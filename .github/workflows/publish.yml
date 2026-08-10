@@ -1,0 +1,158 @@
+name: Publish Solar2D Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "entrypoint.sh"
+      - "build-html5.sh"
+      - "build-android.sh"
+      - ".github/workflows/publish.yml"
+  schedule:
+    # Monday morning: pick up a new Solar2D release without anyone asking.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      solar2d_version:
+        description: "Solar2D version (e.g. 2026.3731). Leave empty to auto-detect latest."
+        required: false
+
+env:
+  REGISTRY: ghcr.io
+  # Deliberately not derived from github.repository: that would publish
+  # ghcr.io/chkuendig/docker-solar2d — "docker" twice in a registry path — and
+  # would silently move the image everyone pulls if the repo is ever renamed.
+  IMAGE_NAME: chkuendig/solar2d
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      solar2d_version: ${{ steps.decide.outputs.solar2d_version }}
+      solar2d_tag: ${{ steps.decide.outputs.solar2d_tag }}
+      solar2d_ref_sha: ${{ steps.forkref.outputs.sha }}
+
+    steps:
+      - name: Resolve Solar2D version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -n "${{ inputs.solar2d_version }}" ]]; then
+            VERSION="${{ inputs.solar2d_version }}"
+            echo "Using manual override: $VERSION"
+          else
+            echo "Auto-detecting latest Solar2D release..."
+            RELEASE_NAME=$(gh api repos/coronalabs/corona/releases/latest --jq '.name')
+            # Release name format: "Solar2D 2026.3728" → extract "2026.3728"
+            VERSION=$(echo "$RELEASE_NAME" | grep -oP '\d{4}\.\d+')
+            if [[ -z "$VERSION" ]]; then
+              echo "::error::Could not parse version from release name: $RELEASE_NAME"
+              exit 1
+            fi
+          fi
+
+          # Derive tag (e.g. "2026.3728" → "3728")
+          TAG="${VERSION#*.}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved Solar2D version: $VERSION (tag: $TAG)"
+
+      # The image builds from a branch of our Solar2D fork, so its content moves
+      # without its name moving. Resolve it here: it pins the build, busts the
+      # layer cache when the branch advances, and fails now rather than
+      # mid-build if a new release has no branch yet.
+      - name: Resolve fork branch commit
+        id: forkref
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="linux-${{ steps.resolve.outputs.tag }}"
+          if ! SHA=$(gh api "repos/chkuendig/corona/commits/$BRANCH" --jq .sha 2>/dev/null); then
+            echo "::error::chkuendig/corona has no branch $BRANCH — push one cut from tag ${{ steps.resolve.outputs.tag }} before building"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Solar2D source: $BRANCH @ $SHA"
+
+      - name: Check if image already exists
+        id: exists
+        run: |
+          TAG="${{ steps.resolve.outputs.tag }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
+          echo "Checking for existing image: $IMAGE"
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image $IMAGE already exists"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Image $IMAGE not found"
+          fi
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          TAG="${{ steps.resolve.outputs.tag }}"
+          EXISTS="${{ steps.exists.outputs.exists }}"
+          EVENT="${{ github.event_name }}"
+
+          echo "solar2d_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "solar2d_tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if [[ "$EVENT" == "push" ]]; then
+            echo "Push event (image sources changed) — always build"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EXISTS" == "true" ]]; then
+            echo "Image for $VERSION already exists — skipping build"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Image for $VERSION not found — building"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ needs.check.outputs.solar2d_tag }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SOLAR2D_VERSION=${{ needs.check.outputs.solar2d_version }}
+            SOLAR2D_REF_SHA=${{ needs.check.outputs.solar2d_ref_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
