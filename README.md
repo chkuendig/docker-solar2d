@@ -5,7 +5,7 @@ a **headless simulator**, and an **MCP server** for driving it.
 
 ```
 ghcr.io/chkuendig/solar2d:latest
-ghcr.io/chkuendig/solar2d:3728     # pinned to a Solar2D release
+ghcr.io/chkuendig/solar2d:3731     # pinned to a Solar2D release
 ```
 
 Solar2D ships no Linux builder. The official HTML5 and Android tooling is macOS and
@@ -80,7 +80,7 @@ than quietly producing an unpatched tree.
 
 | Arg | Purpose |
 |---|---|
-| `SOLAR2D_VERSION` | Release to build, e.g. `2026.3728`. Picks the MSI and the default fork branch |
+| `SOLAR2D_VERSION` | Release to build, e.g. `2026.3731`. Picks the MSI and the default fork branch |
 | `SOLAR2D_REPO` / `SOLAR2D_REF` | Build a different tree or branch — an upstream tag, a PR branch, another fork |
 | `SOLAR2D_REF_SHA` | Expected commit of that branch. Verified after cloning, and busts the layer cache when the branch moves |
 | `SOLAR2D_PRS` | Space-separated upstream PR numbers, applied as diffs — e.g. `891`. For trying a PR without committing to it |
@@ -92,8 +92,8 @@ building last week's tree — silently. CI resolves the branch head and passes i
 Building by hand after pushing to the branch, do the same or use `--no-cache`:
 
 ```bash
-docker build --build-arg SOLAR2D_VERSION=2026.3728 \
-  --build-arg SOLAR2D_REF_SHA=$(gh api repos/chkuendig/corona/commits/linux-3728 --jq .sha) \
+docker build --build-arg SOLAR2D_VERSION=2026.3731 \
+  --build-arg SOLAR2D_REF_SHA=$(gh api repos/chkuendig/corona/commits/linux-3731 --jq .sha) \
   -t solar2d .
 ```
 
