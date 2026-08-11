@@ -228,7 +228,7 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 # the stdout→DEVNULL fix we used to carry is upstream's own now.
 #   fork:     https://github.com/chkuendig/solar2d-mcp/tree/linux-fixes
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=d15f1e9223c175dc5292c2fcbea82608a836c489
+ARG SOLAR2D_MCP_REF=b01d979e76b5b11da87912510ebeb7a5198f0884
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
