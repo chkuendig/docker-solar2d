@@ -168,6 +168,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-utils \
     libgtk-3-0 \
     libwebkit2gtk-4.0-37 \
+    # MCP: stitches recorded frames into an MP4
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy both binaries and shared resources
@@ -221,12 +223,12 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 
 # solar2d-mcp: Python MCP server for simulator control (screenshots, taps, logs).
 # Our Linux work lives on the `linux-fixes` branch of the fork, pinned by commit:
-# the simulator argument format, and waiting a frame for display.save() to write.
-# Both sit on top of upstream main — the stdout→DEVNULL fix we used to carry is
-# upstream's own now.
+# the simulator argument format, and publishing a capture by atomic rename so a
+# reader never gets a partial or stale frame. Both sit on top of upstream main —
+# the stdout→DEVNULL fix we used to carry is upstream's own now.
 #   fork:     https://github.com/chkuendig/solar2d-mcp/tree/linux-fixes
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=842c893f18e62913bc12ec52fa4d5ded0854b6ea
+ARG SOLAR2D_MCP_REF=d15f1e9223c175dc5292c2fcbea82608a836c489
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
