@@ -168,6 +168,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11-utils \
     libgtk-3-0 \
     libwebkit2gtk-4.0-37 \
+    # MCP: stitches recorded frames into an MP4
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy both binaries and shared resources
