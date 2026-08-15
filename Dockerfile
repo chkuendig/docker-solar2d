@@ -119,13 +119,15 @@ RUN if [ -n "$SOLAR2D_PRS" ]; then \
 WORKDIR /opt/solar2d/build
 RUN cmake .. && make -j$(nproc) Solar2DBuilder Solar2DSimulator
 
-# cmake copies neither of these into build/Resources: the Native tree because it is
-# not built on Linux at all, AndroidValidation.lua because it is read from disk at
-# build time rather than compiled into the binary like the other Lua resources.
+# The Native tree is not built on Linux at all, so cmake has nothing to copy.
+# (AndroidValidation.lua was staged here too until the fork's CMakeResources.txt
+# started installing it — see coronalabs/corona#936.)
 RUN mkdir -p /opt/solar2d/build/Resources/Native/Corona && \
     cp -r /opt/native-staging/android /opt/native-staging/shared \
-          /opt/solar2d/build/Resources/Native/Corona/ && \
-    cp /opt/solar2d/platform/resources/AndroidValidation.lua /opt/solar2d/build/Resources/
+          /opt/solar2d/build/Resources/Native/Corona/
+
+# cmake installs this now; without it every Android build stops before it starts.
+RUN test -f /opt/solar2d/build/Resources/AndroidValidation.lua
 
 RUN /opt/solar2d/build/Solar2DBuilder build --help 2>&1 | head -5
 RUN ls -la /opt/solar2d/build/Solar2DSimulator
