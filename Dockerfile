@@ -225,12 +225,12 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 
 # solar2d-mcp: Python MCP server for simulator control (screenshots, taps, logs).
 # Our Linux work lives on the `linux-fixes` branch of the fork, pinned by commit:
-# the simulator argument format, and publishing a capture by atomic rename so a
-# reader never gets a partial or stale frame. Both sit on top of upstream main —
-# the stdout→DEVNULL fix we used to carry is upstream's own now.
+# the simulator argument format, publishing a capture by atomic rename so a
+# reader never gets a partial or stale frame, and an SDK ceiling. All offered
+# upstream in sensiblecoder/solar2d-mcp#1.
 #   fork:     https://github.com/chkuendig/solar2d-mcp/tree/linux-fixes
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=58ba81dd23862f8b0bc2a74df2f0de0c869b866a
+ARG SOLAR2D_MCP_REF=e77ccc7fd6049619288fd490a797f13dd92fca61
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
