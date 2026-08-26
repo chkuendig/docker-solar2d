@@ -32,6 +32,35 @@ docker run -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d simulate
 docker run -i -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d mcp
 ```
 
+### Warm MCP runtime
+
+Keep Xvfb and the image warm, then start one bounded stdio server per MCP
+client with `docker exec`:
+
+```bash
+mkdir -p /tmp/solar2d-review
+docker run -d --init --name solar2d-runtime \
+  --cpus=1 --memory=1g --pids-limit=128 \
+  -v /absolute/workspace/root:/absolute/workspace/root \
+  -v /tmp/solar2d-review:/artifacts \
+  ghcr.io/chkuendig/solar2d runtime
+
+docker exec -i solar2d-runtime entrypoint.sh session
+```
+
+The workspace bind mount must preserve its absolute path because MCP clients pass
+host project paths to the server. Encoded MP4s are exported through `/artifacts`,
+so review media can be uploaded without committing it to a repository.
+
+Simulator access is one slot per runtime. A second MCP connection stays healthy
+and receives a busy response while another client owns the simulator. The session
+command defaults to a 20-minute limit; set `SOLAR2D_MCP_SESSION_TIMEOUT` on the
+runtime container if a different bound is needed. SIGTERM and normal disconnect
+both stop only the owning session's simulator before releasing its slot.
+
+Do not enable parallel simulators yet. They still require separate displays,
+homes/Solar2D sandboxes, temporary directories, and per-slot resource accounting.
+
 Without a keystore the Android build is signed with Android's public debug key:
 installable, not distributable. Pass `ANDROID_KEYSTORE_BASE64` and friends to sign
 for real — see `build-android.sh` for the full list.
@@ -56,7 +85,7 @@ it pulls from two forks that are part of the supply chain:
 | Repo | Branch | Why |
 |---|---|---|
 | [`chkuendig/corona`](https://github.com/chkuendig/corona) | `linux-<tag>` | Solar2D with the Linux gaps closed |
-| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `linux-fixes` | MCP server with Linux launch fixes |
+| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `main` | MCP server with Linux launch fixes and shared-runtime coordination |
 
 The Solar2D fork carries three changes, each also on its own branch for offering
 upstream:

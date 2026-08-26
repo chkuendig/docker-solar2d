@@ -219,18 +219,21 @@ RUN mkdir -p /gradle-cache /tmp/gradle-warm && \
     rm -rf /tmp/gradle-warm && \
     chmod -R 0777 /gradle-cache
 
+ENV DISPLAY=:99
+ENV SOLAR2D_MCP_ARTIFACT_DIR=/artifacts
+
 COPY build-html5.sh build-android.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/entrypoint.sh
 
 # solar2d-mcp: Python MCP server for simulator control (screenshots, taps, logs).
-# Our Linux work lives on the `linux-fixes` branch of the fork, pinned by commit:
-# the simulator argument format, publishing a capture by atomic rename so a
-# reader never gets a partial or stale frame, and an SDK ceiling. All offered
-# upstream in sensiblecoder/solar2d-mcp#1.
-#   fork:     https://github.com/chkuendig/solar2d-mcp/tree/linux-fixes
+# The fork's main branch carries the Linux compatibility work plus a single-slot
+# runtime lease. Separate MCP clients can share this image without killing each
+# other's simulator; competing tool calls receive a useful busy response.
+# The exact source commit is pinned for reproducible image builds.
+#   fork:     https://github.com/chkuendig/solar2d-mcp
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=e77ccc7fd6049619288fd490a797f13dd92fca61
+ARG SOLAR2D_MCP_REF=193353c3978af74f0537ecc6f1498fca5246b451
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
@@ -240,5 +243,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 
 LABEL org.opencontainers.image.source=https://github.com/chkuendig/docker-solar2d
 
-VOLUME ["/project", "/output"]
+VOLUME ["/project", "/output", "/artifacts"]
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
