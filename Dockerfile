@@ -233,8 +233,8 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 # The exact source commit is pinned for reproducible image builds.
 #   fork:     https://github.com/chkuendig/solar2d-mcp
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-#   merged:   https://github.com/chkuendig/solar2d-mcp/pull/5
-ARG SOLAR2D_MCP_REF=23494e5f595a5862b9e88986bf37408d8bd7f0c8
+#   branch:   https://github.com/chkuendig/solar2d-mcp/tree/fix/x11-recorder-cleanup
+ARG SOLAR2D_MCP_REF=d4f7a8615e33960c8f772f247988c75a2fb9b9b0
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
