@@ -231,14 +231,13 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/entrypoint.sh
 
 # solar2d-mcp: Python MCP server for simulator control (screenshots, taps, logs).
-# The fork's main branch carries the Linux compatibility work plus a single-slot
-# runtime lease. Separate MCP clients can share this image without killing each
-# other's simulator; competing tool calls receive a useful busy response.
-# The exact source commit is pinned for reproducible image builds.
+# The fork's linux-fixes branch carries the Linux compatibility work plus a
+# single-slot runtime lease. Separate MCP clients can share this image without
+# killing each other's simulator; competing tool calls receive a useful busy
+# response. The exact source commit is pinned for reproducible image builds.
 #   fork:     https://github.com/chkuendig/solar2d-mcp
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-#   merged:   https://github.com/chkuendig/solar2d-mcp/pull/5
-ARG SOLAR2D_MCP_REF=23494e5f595a5862b9e88986bf37408d8bd7f0c8
+ARG SOLAR2D_MCP_REF=e82dc2eb31fc0cfa477b6f6e4ae82aef79ef371a
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \

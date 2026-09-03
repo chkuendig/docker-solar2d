@@ -85,7 +85,7 @@ it pulls from two forks that are part of the supply chain:
 | Repo | Branch | Why |
 |---|---|---|
 | [`chkuendig/corona`](https://github.com/chkuendig/corona) | `linux-<tag>` | Solar2D with the Linux gaps closed |
-| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `main` | MCP server with Linux launch fixes and shared-runtime coordination |
+| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `linux-fixes` | MCP server with Linux launch fixes and shared-runtime coordination |
 
 The Solar2D fork carries three changes, each also on its own branch for offering
 upstream:
