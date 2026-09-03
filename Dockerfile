@@ -182,8 +182,11 @@ RUN mkdir -p /usr/local/bin/Resources
 COPY --from=compile /opt/solar2d/build/Resources/ /usr/local/bin/Resources/
 
 # Android SDK. compileSdk/targetSdk are 35 in Solar2D's Gradle template; build-tools
-# must match. Only the three packages a Solar2D build actually reaches for are
-# installed — the full SDK is several GB. The licences directory is made writable
+# must match. android-36 is installed next to it because a project can raise its own
+# target: every platform a build may compile against has to be present at image build
+# time, since the container runs as an ordinary user and sdkmanager cannot write to
+# /opt/android-sdk at runtime. Only the packages a Solar2D build actually reaches for
+# are installed — the full SDK is several GB. The licences directory is made writable
 # because the template's setup.sh re-appends the SDK licence on every build: a no-op
 # as root, but the dev container runs as an ordinary user and would fail there.
 ENV ANDROID_HOME=/opt/android-sdk
@@ -193,6 +196,7 @@ ENV PATH=$PATH:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/la
 
 ARG ANDROID_CMDLINE_TOOLS=11076708
 ARG ANDROID_API=35
+ARG ANDROID_EXTRA_API=36
 ARG ANDROID_BUILD_TOOLS=35.0.0
 RUN mkdir -p "$ANDROID_HOME/cmdline-tools" && \
     curl -fsSL -o /tmp/cmdline-tools.zip \
@@ -202,7 +206,7 @@ RUN mkdir -p "$ANDROID_HOME/cmdline-tools" && \
     rm /tmp/cmdline-tools.zip && \
     yes | sdkmanager --licenses > /dev/null && \
     sdkmanager --install "platform-tools" "platforms;android-${ANDROID_API}" \
-      "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null && \
+      "platforms;android-${ANDROID_EXTRA_API}" "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null && \
     chmod -R a+rwX "$ANDROID_HOME/licenses"
 
 # Gradle's own distribution, pre-fetched so a build does not spend its first two
