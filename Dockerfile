@@ -247,5 +247,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 
 LABEL org.opencontainers.image.source=https://github.com/chkuendig/docker-solar2d
 
-VOLUME ["/project", "/output", "/artifacts"]
+# Plain working dirs, deliberately NOT a VOLUME. A VOLUME here forces Docker to
+# create an anonymous volume on every `docker run` that does not bind all three
+# paths, and Docker never auto-removes it when the container is killed instead
+# of exiting cleanly (a common CI failure mode) — so each such run leaks a
+# dangling volume. As ordinary directories, callers can still bind- or
+# tmpfs-mount them, and an unmounted path just writes to the container layer
+# with nothing left behind. Do not reintroduce VOLUME.
+RUN mkdir -p /project /output /artifacts
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
