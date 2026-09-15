@@ -17,6 +17,9 @@ on:
       solar2d_version:
         description: "Solar2D version (e.g. 2026.3731). Leave empty to auto-detect latest."
         required: false
+      image_tag:
+        description: "Optional candidate tag. When set, do not move latest or the release tag."
+        required: false
 
 env:
   REGISTRY: ghcr.io
@@ -101,11 +104,15 @@ jobs:
           TAG="${{ steps.resolve.outputs.tag }}"
           EXISTS="${{ steps.exists.outputs.exists }}"
           EVENT="${{ github.event_name }}"
+          CANDIDATE_TAG="${{ inputs.image_tag }}"
 
           echo "solar2d_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "solar2d_tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          if [[ "$EVENT" == "push" ]]; then
+          if [[ -n "$CANDIDATE_TAG" ]]; then
+            echo "Manual candidate tag $CANDIDATE_TAG — always build"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT" == "push" ]]; then
             echo "Push event (image sources changed) — always build"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           elif [[ "$EXISTS" == "true" ]]; then
@@ -141,8 +148,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ needs.check.outputs.solar2d_tag }}
+            type=raw,value=latest,enable=${{ inputs.image_tag == '' }}
+            type=raw,value=${{ needs.check.outputs.solar2d_tag }},enable=${{ inputs.image_tag == '' }}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ inputs.image_tag != '' }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
