@@ -39,8 +39,11 @@ env consumed so children cannot inherit the channel, ownership by `SolarApp`).
 - Content coordinates are converted through the display's own
   `ContentToScreen` transform with the menu height added back — the exact
   inverse of what `LinuxMouseListener` does on the way in, so injected events
-  are indistinguishable from real ones downstream: listener → hit-testing →
-  native focus. This is the headless equivalent of an OS-level tap; Lua-side
+  take the genuine path downstream — listener → hit-testing →
+  native focus. Touch events are faithful; Corona `mouse` listeners are not
+  fully — `SDL_PushEvent` does not update SDL's global button state, so
+  `isPrimaryButtonDown` reads false. This is the headless equivalent of an
+  OS-level tap for touch; Lua-side
   handler dispatch bypasses that pipeline and is not this.
 - Every pushed SDL event carries the correct `windowID` — the poll loop
   filters on it.
@@ -111,7 +114,7 @@ definition gates the hook sites so player builds have no reference at all.
 | Env var | Meaning | Default |
 |---|---|---|
 | `SOLAR2D_VIDEO_PIPE` | absolute path of a FIFO to stream framed BGRA to | unset = feature off |
-| `SOLAR2D_VIDEO_FPS` | cap on frames emitted per wall-clock second | runtime fps |
+| `SOLAR2D_VIDEO_FPS` | cap on frames emitted per wall-clock second | 30 (set by the MCP launcher to its max) |
 
 Validation at startup: path must be absolute, fps must parse; otherwise log
 once and disable.
@@ -143,8 +146,13 @@ spawning ffmpeg) and raced across resizes.
 
 At startup (env set, path checks passed) the tap writes `<path>.ready`
 (containing pid + protocol version), kept for the process lifetime and removed
-on exit. This is what the MCP probes — **never** the FIFO itself, because any
-open of the FIFO connects a reader and starts the stream (review S9).
+on orderly teardown — `os.exit()`-style leaves and hard kills leave a stale
+marker behind, which is why consumers check the pid against `/proc` (and the
+launcher against the simulator pid). This is what the MCP probes — **never**
+the FIFO itself, because any open of the FIFO connects a reader and starts the
+stream (review S9). The marker and lock files are unlinked only by the flock
+holder, so a second tap that loses the lock race cannot delete the live tap's
+files.
 
 ### Ownership and lifetime (review B3)
 
@@ -156,20 +164,26 @@ reaches the tap through `app`.
 
 ### Commit point (review S5)
 
-`Flush()` only *stages*: it marks the tap's fill buffer dirty (rendering into
-FBO 0 happened; extra Flushes from `Display::Capture` just re-mark). The
-readback + enqueue commit happens **once per tick, at the end of
-`SolarAppContext::advance()`** — the last presented frame of the tick wins, and
-screenshots taken mid-recording produce no extra or bogus frames.
+`Flush()` *stages*: it runs the readback into the fill buffer while FBO 0 is
+still current (before the swap — this is the one point where the pixels exist),
+after peeking the pacing accumulator so no readback is paid when no frame is
+due under the fps cap. Extra Flushes from `Display::Capture` just overwrite
+the staging buffer. The enqueue **commit** happens **once per tick, at the end
+of `SolarAppContext::advance()`** — the last presented frame of the tick wins,
+and screenshots taken mid-recording produce no extra or bogus frames.
 
 ### Threading, pacing, backpressure (reviews S2, S6, B4, B5)
 
-Three buffers: one being filled (readback), one queued, one in flight to the
-writer. Each buffer owns its w/h/seq/time copy — the writer never reads shared
-size state.
+One fill buffer plus a queue bounded at 2 (fill + queued are the design's
+"three buffers"; the in-flight frame is owned by the writer). Buffers are
+freshly allocated per frame rather than recycled — cheap at capture sizes;
+recycling is a follow-up if large windows ever matter. Each queued buffer
+carries its own w/h/seq/time — the writer never reads shared size state.
 
-- **Render thread**: when the queue is full, skip the `glReadPixels` entirely.
-  Otherwise readback into the fill buffer, enqueue, swap.
+- **Render thread**: when the queue is full or no frame is due, skip the
+  `glReadPixels` entirely (it is a sync point for llvmpipe's threaded
+  rasterizer, not just a memcpy). Otherwise readback into the fill buffer;
+  commit enqueues it.
 - **Pacing**: accumulator (`next_emit += 1/fps`, half-interval slack, hard
   reset if fallen > 2 intervals behind) — the naive "≥ 1/fps since last emit"
   rule aliases against the main loop's truncated millisecond sleeps and yields
@@ -201,7 +215,8 @@ size state.
 - `O_CLOEXEC` everywhere, and `unsetenv("SOLAR2D_VIDEO_PIPE")` after the tap
   reads it — the simulator spawns children via `system()` (built apps, adb,
   xdg-open) which must neither hold the write end nor become second writers.
-- Optional `F_SETPIPE_SZ` to 1 MB: a 6 MB frame becomes ~6 poll wakeups
+- `F_SETPIPE_SZ` was considered and not implemented: the writer poll loop
+  handles the wakeups fine and the knob needs privileges above 1 MB.
   instead of ~96.
 
 ### GL state around the readback (review S7)
