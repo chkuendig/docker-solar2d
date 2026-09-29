@@ -196,18 +196,20 @@ ARG ANDROID_CMDLINE_TOOLS=11076708
 ARG ANDROID_API=35
 ARG ANDROID_EXTRA_API=36
 ARG ANDROID_BUILD_TOOLS=35.0.0
-# cmdline-tools exist only to run sdkmanager at image build time, and
-# platform-tools (adb) is never used by a build — the template's setup.sh
-# touches only the licences directory. Both are dropped afterwards: 170MB
-# that no Solar2D build ever reads.
+# cmdline-tools exist only to run sdkmanager at image build time, and platform-tools
+# (adb) is never used by a build — the template's setup.sh touches only the
+# licences directory. Both are dropped afterwards: 170MB that no Solar2D build
+# ever reads. sdkmanager is invoked by absolute path: no PATH entry may remain,
+# or it would promise tools the runtime image no longer ships.
 RUN mkdir -p "$ANDROID_HOME/cmdline-tools" && \
     curl -fsSL -o /tmp/cmdline-tools.zip \
       "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS}_latest.zip" && \
     unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools" && \
     mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" && \
     rm /tmp/cmdline-tools.zip && \
-    yes | sdkmanager --licenses > /dev/null && \
-    sdkmanager --install "platforms;android-${ANDROID_API}" \
+    SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" && \
+    yes | "$SDKMANAGER" --licenses > /dev/null && \
+    "$SDKMANAGER" --install "platforms;android-${ANDROID_API}" \
       "platforms;android-${ANDROID_EXTRA_API}" "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null && \
     chmod -R a+rwX "$ANDROID_HOME/licenses" && \
     rm -rf "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/platform-tools"
