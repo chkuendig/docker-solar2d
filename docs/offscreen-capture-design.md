@@ -255,9 +255,12 @@ Every smart bit lives in the consumer, testable without rebuilding the engine.
      yields a 30 s video for 30 s of wall clock, with duplication exactly
      where frames were dropped — review B4), and **fragmented MP4 output**
      (`-movflags +frag_keyframe+empty_moov+default_base_moof`, not
-     `+faststart`) so a recording survives a SIGKILL of the whole run —
-     harness hang-detectors kill the job, and that recording is the evidence
-     wanted. Encode otherwise unchanged (`libx264 ultrafast crf 20`).
+     `+faststart`) with a short keyint so fragments close about once a second
+     — a SIGKILL of the whole run loses at most ~1s of tail, which is the
+     evidence a harness hang-detector kill wants. Note: `-preset ultrafast`
+     disables scenecut, so without the short keyint fragments only close at
+     the default 250-frame GOP (~8s of tail). Encode otherwise unchanged
+     (`libx264 ultrafast crf 20`).
   4. `bgr0` (alpha is meaningless).
 - `stop`: signal the relay (which closes ffmpeg's stdin → clean finalize).
   ffmpeg never blocks in `open()` because only the relay touches the FIFO.
