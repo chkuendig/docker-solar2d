@@ -32,6 +32,48 @@ docker run -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d simulate
 docker run -i -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d mcp
 ```
 
+### From GitHub Actions
+
+Both build steps ship as composite actions, so a workflow does not hand-write
+`docker run` and its volume mounts:
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: chkuendig/docker-solar2d/.github/actions/build-html5@v1
+        with:
+          project: corona
+          app-name: MyApp
+
+      - uses: chkuendig/docker-solar2d/.github/actions/build-android@v1
+        with:
+          project: corona
+          app-name: MyApp
+          package: com.example.myapp
+          version-code: ${{ github.run_number }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          ANDROID_KEYSTORE_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_ALIAS_PASSWORD }}
+```
+
+Inputs map one-to-one onto the build scripts' flags (`project`, `output`,
+`app-name`, `app-version`, `html5-custom`, and on Android `package`,
+`version-code`, `store`, `keystore`). The workspace is mounted into the
+container at its own absolute path, so those inputs are plain
+workspace-relative paths. Signing credentials travel through `env`, never
+`with` — GitHub can mask secrets in logs but not in input values rendered into
+workflow UIs.
+
+Pin the `image` input (`ghcr.io/chkuendig/solar2d:3731`) alongside the action
+ref: `@v1` selects the action's code, the image tag selects the Solar2D
+release it runs.
+
 ### Warm MCP runtime
 
 Keep Xvfb and the image warm, then start one bounded stdio server per MCP
@@ -76,6 +118,7 @@ you can ship your own `index.html`, icons and manifest.
 | `Solar2DSimulator` | headless, via Xvfb |
 | [`solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | MCP server: run projects, screenshots, taps, logs |
 | Android SDK, Gradle, JDK 17 | pre-warmed so a build does not start by downloading Gradle |
+| `.github/actions/*` | composite actions wrapping the build steps for CI consumers |
 
 ## It is three repos, not one
 

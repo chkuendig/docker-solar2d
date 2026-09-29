@@ -1,0 +1,72 @@
+name: Test Actions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/**"
+      - ".github/workflows/test-actions.yml"
+  pull_request:
+    paths:
+      - ".github/actions/**"
+      - ".github/workflows/test-actions.yml"
+  workflow_dispatch:
+
+jobs:
+  html5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample project
+        run: |
+          mkdir -p sample
+          cat > sample/config.lua <<'EOF'
+          application =
+          {
+              content = { width = 320, height = 480, scale = "letterbox" },
+          }
+          EOF
+          cat > sample/main.lua <<'EOF'
+          display.newText("hello", display.contentCenterX, display.contentCenterY)
+          EOF
+
+      - uses: ./.github/actions/build-html5
+        with:
+          project: sample
+          output: out/html5
+          app-name: Sample
+
+      - name: Check output
+        run: test -f out/html5/Sample.html5/index.html
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample project
+        run: |
+          mkdir -p sample
+          cat > sample/config.lua <<'EOF'
+          application =
+          {
+              content = { width = 320, height = 480, scale = "letterbox" },
+          }
+          EOF
+          cat > sample/main.lua <<'EOF'
+          display.newText("hello", display.contentCenterX, display.contentCenterY)
+          EOF
+
+      - uses: ./.github/actions/build-android
+        with:
+          project: sample
+          output: out/android
+          app-name: Sample
+          package: com.example.sample
+          version-code: ${{ github.run_number }}
+
+      - name: Check output
+        run: |
+          test -f out/android/Sample.apk
+          test -f out/android/Sample.aab

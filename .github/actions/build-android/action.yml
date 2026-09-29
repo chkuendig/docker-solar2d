@@ -1,0 +1,101 @@
+name: "Build Android"
+description: >-
+  Build a Solar2D project to APK + AAB with the solar2d Docker image.
+  Mounts the whole workspace at its own absolute path, so project and output
+  are plain workspace-relative paths. Signing credentials are forwarded from
+  the caller's environment (ANDROID_KEYSTORE_BASE64 and friends); without
+  them the build is signed with Android's public debug key.
+inputs:
+  project:
+    description: "Solar2D project directory, relative to the workspace root"
+    required: true
+  output:
+    description: "Build output directory, relative to the workspace root"
+    required: false
+    default: "build/android"
+  app-name:
+    description: "Application name (also the output file names)"
+    required: true
+  app-version:
+    description: "versionName shown to users"
+    required: false
+    default: "1.0.0"
+  package:
+    description: "Application id, e.g. com.example.myapp"
+    required: true
+  version-code:
+    description: "Integer versionCode; use ${{ github.run_number }} for one per run"
+    required: false
+    default: "1"
+  store:
+    description: "Target store: google | amazon | none"
+    required: false
+    default: "google"
+  keystore:
+    description: >-
+      Optional keystore file, relative to the workspace root. The
+      ANDROID_KEYSTORE_BASE64 environment variable is the CI-friendly
+      alternative and wins over this input.
+    required: false
+    default: ""
+  build-version:
+    description: "Value injected into Lua as _G.BUILD_VERSION"
+    required: false
+    default: "${{ github.sha }}"
+  image:
+    description: "solar2d Docker image to run"
+    required: false
+    default: "ghcr.io/chkuendig/solar2d:latest"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PROJECT: ${{ inputs.project }}
+        OUTPUT: ${{ inputs.output }}
+        APP_NAME: ${{ inputs.app-name }}
+        APP_VERSION: ${{ inputs.app-version }}
+        PACKAGE: ${{ inputs.package }}
+        VERSION_CODE: ${{ inputs.version-code }}
+        STORE: ${{ inputs.store }}
+        KEYSTORE: ${{ inputs.keystore }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -d "$GITHUB_WORKSPACE/$PROJECT" ]; then
+          echo "::error::project directory '$PROJECT' not found under the workspace root"
+          exit 1
+        fi
+
+        ARGS=()
+        if [ -n "$KEYSTORE" ]; then
+          if [ ! -f "$GITHUB_WORKSPACE/$KEYSTORE" ]; then
+            echo "::error::keystore file '$KEYSTORE' not found under the workspace root"
+            exit 1
+          fi
+          ARGS+=(--keystore "$GITHUB_WORKSPACE/$KEYSTORE")
+        fi
+
+        # The workspace is mounted at its own absolute path so the project,
+        # output and keystore paths keep their runner paths. Signing secrets
+        # are forwarded name-only (-e NAME) from the caller's environment:
+        # they never appear on a command line in the logs.
+        docker run --rm \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -e BUILD_VERSION \
+          -e ANDROID_KEYSTORE_BASE64 \
+          -e ANDROID_KEYSTORE_PASSWORD \
+          -e ANDROID_KEYSTORE_ALIAS \
+          -e ANDROID_KEYSTORE_ALIAS_PASSWORD \
+          "$IMAGE" \
+          build-android \
+          --project-path "$GITHUB_WORKSPACE/$PROJECT" \
+          --output-path "$GITHUB_WORKSPACE/$OUTPUT" \
+          --app-name "$APP_NAME" \
+          --app-version "$APP_VERSION" \
+          --package "$PACKAGE" \
+          --version-code "$VERSION_CODE" \
+          --store "$STORE" \
+          "${ARGS[@]}"
