@@ -1,0 +1,88 @@
+name: "Capture Screenshot"
+description: >-
+  One screenshot of a Solar2D project from the headless simulator (offscreen
+  EGL, no X server). Requires an image built from the fork's frame-tap
+  branches. How the app reaches the scene you want at delay-ms is your
+  project's preview hook — env vars listed in `env` reach it unchanged.
+inputs:
+  project:
+    description: "Solar2D project directory, relative to the workspace root"
+    required: true
+  output:
+    description: "Directory the PNG lands in, relative to the workspace root"
+    required: false
+    default: "captures"
+  label:
+    description: "Capture name; output file is <output>/<label>.png"
+    required: true
+  screen:
+    description: "Content box to pin, WxH (e.g. 1043x1390)"
+    required: false
+    default: "640x1390"
+  delay-ms:
+    description: "Milliseconds to let the app run before the frame is saved"
+    required: false
+    default: "14000"
+  env:
+    description: >-
+      Multiline KEY=VALUE list forwarded into the simulator (scene selection,
+      fixtures, seeds). Values must not be secrets: docker inspect exposes
+      container env to anyone who can run docker on the runner.
+    required: false
+    default: ""
+  image:
+    description: "solar2d Docker image to run"
+    required: false
+    default: "ghcr.io/chkuendig/solar2d:latest"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PROJECT: ${{ inputs.project }}
+        OUTPUT: ${{ inputs.output }}
+        LABEL: ${{ inputs.label }}
+        SCREEN: ${{ inputs.screen }}
+        DELAY: ${{ inputs.delay-ms }}
+        PASSTHROUGH: ${{ inputs.env }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -d "$GITHUB_WORKSPACE/$PROJECT" ]; then
+          echo "::error::project directory '$PROJECT' not found under the workspace root"
+          exit 1
+        fi
+        if ! [[ "$SCREEN" =~ ^[0-9]+x[0-9]+$ ]]; then
+          echo "::error::screen '$SCREEN' is not <width>x<height>"
+          exit 1
+        fi
+
+        ENVS=()
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          if ! [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            echo "::error::env line '$line' is not KEY=VALUE"
+            exit 1
+          fi
+          ENVS+=(-e "${line%%=*}")
+          export "${line?}"
+        done <<< "$PASSTHROUGH"
+
+        mkdir -p "$GITHUB_WORKSPACE/$OUTPUT"
+
+        # Same shape as the build actions: the workspace mounted at its own
+        # absolute path, env forwarded name-only so nothing caller-provided
+        # lands on a command line in the logs.
+        docker run --rm \
+          --cpus 1.5 --memory 1g \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -e HOME=/tmp \
+          -e BUILD_VERSION \
+          "${ENVS[@]}" \
+          "$IMAGE" \
+          capture "$LABEL" "$SCREEN" "$DELAY" 2>&1 | sed 's/^/  /'
+
+        # capture.sh validated the PNG inside the container; this proves the
+        # file reached the workspace.
+        test -f "$GITHUB_WORKSPACE/$OUTPUT/$LABEL.png"

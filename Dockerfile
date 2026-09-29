@@ -142,6 +142,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Shared runtime libs
     libgl1-mesa-dri \
+    libegl1 \
+    libgl1 \
+    libglx-mesa0 \
     libfreetype6 \
     libcurl3-gnutls \
     libpcap0.8 \
@@ -151,8 +154,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng16-16 \
     zlib1g \
     libopenal1 \
-    lua5.3 \
-    liblua5.3-0 \
     # Builder: zip/unzip for HTML5 packaging
     unzip \
     zip \
@@ -163,23 +164,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Gradle downloads its own distribution and the Android SDK packages
     ca-certificates \
     curl \
-    # Simulator: X11/OpenGL for headless rendering
-    libgl1-mesa-glx \
-    mesa-utils \
+    # Simulator: EGL renders offscreen through Mesa's llvmpipe (no GLX needed
+    # for that). Xvfb stays only because the MCP runtime records the X display
+    # with ffmpeg x11grab; a plain headless run uses SDL_VIDEODRIVER=offscreen.
+    # GTK/WebKit are deliberately absent: the Linux simulator's webview is a
+    # stub that links neither, so they would be ~170MB of dead weight.
     xvfb \
     x11-utils \
-    libgtk-3-0 \
-    libwebkit2gtk-4.0-37 \
     # MCP: stitches recorded frames into an MP4
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy both binaries and shared resources
+# Copy both binaries and shared resources. One copy, under share/, with a
+# symlink at the binary-relative path the simulator and builder look up —
+# a second COPY of the same tree cost 34MB for nothing.
 COPY --from=compile /opt/solar2d/build/Solar2DBuilder /usr/local/bin/Solar2DBuilder
 COPY --from=compile /opt/solar2d/build/Solar2DSimulator /usr/local/bin/Solar2DSimulator
 COPY --from=compile /opt/solar2d/build/Resources/ /usr/local/share/solar2d/Resources/
-RUN mkdir -p /usr/local/bin/Resources
-COPY --from=compile /opt/solar2d/build/Resources/ /usr/local/bin/Resources/
+RUN ln -s /usr/local/share/solar2d/Resources /usr/local/bin/Resources
 
 # Android SDK. compileSdk/targetSdk are 35 in Solar2D's Gradle template; build-tools
 # must match. android-36 is installed next to it because a project can raise its own
@@ -192,12 +194,15 @@ COPY --from=compile /opt/solar2d/build/Resources/ /usr/local/bin/Resources/
 ENV ANDROID_HOME=/opt/android-sdk
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV PATH=$PATH:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin
 
 ARG ANDROID_CMDLINE_TOOLS=11076708
 ARG ANDROID_API=35
 ARG ANDROID_EXTRA_API=36
 ARG ANDROID_BUILD_TOOLS=35.0.0
+# cmdline-tools exist only to run sdkmanager at image build time, and
+# platform-tools (adb) is never used by a build — the template's setup.sh
+# touches only the licences directory. Both are dropped afterwards: 170MB
+# that no Solar2D build ever reads.
 RUN mkdir -p "$ANDROID_HOME/cmdline-tools" && \
     curl -fsSL -o /tmp/cmdline-tools.zip \
       "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS}_latest.zip" && \
@@ -205,15 +210,18 @@ RUN mkdir -p "$ANDROID_HOME/cmdline-tools" && \
     mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" && \
     rm /tmp/cmdline-tools.zip && \
     yes | sdkmanager --licenses > /dev/null && \
-    sdkmanager --install "platform-tools" "platforms;android-${ANDROID_API}" \
+    sdkmanager --install "platforms;android-${ANDROID_API}" \
       "platforms;android-${ANDROID_EXTRA_API}" "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null && \
-    chmod -R a+rwX "$ANDROID_HOME/licenses"
+    chmod -R a+rwX "$ANDROID_HOME/licenses" && \
+    rm -rf "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/platform-tools"
 
 # Gradle's own distribution, pre-fetched so a build does not spend its first two
 # minutes downloading it. The version is pinned by the wrapper inside
 # android-template.zip; reading it from there keeps the two from drifting apart.
-# The dependency cache is deliberately left cold — it is large, changes with the
-# project, and belongs in a mounted GRADLE_USER_HOME instead.
+# The -all distribution unpacks 369MB of docs/ and src/ that nothing in a build
+# reads — the wrapper's .ok marker means it never re-downloads, so they can be
+# stripped. The dependency cache is deliberately left cold — it is large, changes
+# with the project, and belongs in a mounted GRADLE_USER_HOME instead.
 ENV GRADLE_USER_HOME=/gradle-cache
 RUN mkdir -p /gradle-cache /tmp/gradle-warm && \
     unzip -qo /usr/local/bin/Resources/Native/Corona/android/resource/android-template.zip \
@@ -221,14 +229,15 @@ RUN mkdir -p /gradle-cache /tmp/gradle-warm && \
     chmod +x /tmp/gradle-warm/template/gradlew && \
     (cd /tmp/gradle-warm/template && ./gradlew --version > /dev/null) && \
     rm -rf /tmp/gradle-warm && \
+    rm -rf /gradle-cache/wrapper/dists/*/*/gradle-*/docs /gradle-cache/wrapper/dists/*/*/gradle-*/src && \
     chmod -R 0777 /gradle-cache
 
 ENV DISPLAY=:99
 ENV SOLAR2D_MCP_ARTIFACT_DIR=/artifacts
 
-COPY build-html5.sh build-android.sh /usr/local/bin/
+COPY build-html5.sh build-android.sh capture.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/capture.sh /usr/local/bin/entrypoint.sh
 
 # solar2d-mcp: Python MCP server for simulator control (screenshots, taps, logs).
 # The fork's linux-fixes branch carries the Linux compatibility work plus a
@@ -239,8 +248,9 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
 ARG SOLAR2D_MCP_REF=a94bc351c7af777c6a4eb0e78697f55ac4f77b94
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
-    pip3 install --break-system-packages \
+    pip3 install --no-cache-dir --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
+    apt-get purge -y python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /root/.config/solar2d-mcp && \
     echo '{"simulator_path":"/usr/local/bin/Solar2DSimulator"}' > /root/.config/solar2d-mcp/config.json

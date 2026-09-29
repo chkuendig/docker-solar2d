@@ -25,8 +25,12 @@ docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
 docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
   ghcr.io/chkuendig/solar2d build-android --app-name MyApp --package com.example.myapp
 
-# Headless simulator (Xvfb)
+# Headless simulator — offscreen EGL, no X server
 docker run -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d simulate
+
+# One screenshot: content box pinned, app given delay-ms to reach its scene
+docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
+  -e MYAPP_PREVIEW_SCENE=lobby ghcr.io/chkuendig/solar2d capture lobby 1043x1390 14000
 
 # MCP server over stdio, simulator inside
 docker run -i -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d mcp
@@ -74,6 +78,25 @@ Pin the `image` input (`ghcr.io/chkuendig/solar2d:3731`) alongside the action
 ref: `@v1` selects the action's code, the image tag selects the Solar2D
 release it runs.
 
+A `capture` action takes one screenshot the same way — offscreen simulator,
+content box pinned, PNG validated — with the app steered by env passthrough:
+
+```yaml
+      - uses: chkuendig/docker-solar2d/.github/actions/capture@v1
+        with:
+          project: corona
+          label: lobby-4x3
+          screen: 1043x1390
+          delay-ms: 14000
+          env: |
+            MYAPP_DEBUG_PREVIEW=lobby
+            MYAPP_PREVIEW_LANG=de
+```
+
+How the app reaches the scene you want at `delay-ms` stays the project's
+business: `capture` pins geometry and timing, your preview hook picks the
+scene through whatever env vars it already reads.
+
 ### Warm MCP runtime
 
 Keep Xvfb and the image warm, then start one bounded stdio server per MCP
@@ -115,10 +138,10 @@ you can ship your own `index.html`, icons and manifest.
 | | |
 |---|---|
 | `Solar2DBuilder` | HTML5 + Android packager |
-| `Solar2DSimulator` | headless, via Xvfb |
+| `Solar2DSimulator` | headless — offscreen EGL (llvmpipe), no X server |
 | [`solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | MCP server: run projects, screenshots, taps, logs |
 | Android SDK, Gradle, JDK 17 | pre-warmed so a build does not start by downloading Gradle |
-| `.github/actions/*` | composite actions wrapping the build steps for CI consumers |
+| `.github/actions/*` | composite actions wrapping build and capture for CI consumers |
 
 ## It is three repos, not one
 

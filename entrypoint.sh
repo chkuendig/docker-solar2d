@@ -44,10 +44,18 @@ case "${1:-}" in
     shift
     exec build-android.sh "$@"
     ;;
+  capture)
+    shift
+    exec capture.sh "$@"
+    ;;
   simulate)
     shift
     PROJECT="${1:-/project/main.lua}"
-    start_xvfb
+    # Single headless runs render through EGL offscreen (Mesa llvmpipe): no X
+    # server, one process less, ~70MB less memory. Export SDL_VIDEODRIVER=x11
+    # and provide DISPLAY yourself to get the X path instead. (The MCP runtime
+    # keeps Xvfb: its video recording grabs the X display with ffmpeg x11grab.)
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}"
     exec Solar2DSimulator "$PROJECT"
     ;;
   mcp)
@@ -79,7 +87,8 @@ case "${1:-}" in
     echo "Commands:"
     echo "  build          Build HTML5 (WebAssembly) output"
     echo "  build-android  Build Android APK + AAB"
-    echo "  simulate       Run the simulator with hot-reload (headless via Xvfb)"
+    echo "  capture        One screenshot from the headless simulator (no X)"
+    echo "  simulate       Run the simulator with hot-reload (headless offscreen)"
     echo "  mcp            Run one solar2d-mcp server in a disposable container"
     echo "  runtime        Keep one Xvfb display warm for docker exec MCP clients"
     echo "  session        Run one bounded MCP session inside a warm runtime"

@@ -21,6 +21,7 @@ jobs:
       - name: Create sample project
         run: |
           mkdir -p sample
+          echo "settings = {}" > sample/build.settings
           cat > sample/config.lua <<'EOF'
           application =
           {
@@ -48,6 +49,9 @@ jobs:
       - name: Create sample project
         run: |
           mkdir -p sample
+          # CoronaBuilder's Android packager stops before it starts without a
+          # build.settings, even an empty one.
+          echo "settings = {}" > sample/build.settings
           cat > sample/config.lua <<'EOF'
           application =
           {
