@@ -164,14 +164,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Gradle downloads its own distribution and the Android SDK packages
     ca-certificates \
     curl \
-    # Simulator: EGL renders offscreen through Mesa's llvmpipe (no GLX needed
-    # for that). Xvfb stays only because the MCP runtime records the X display
-    # with ffmpeg x11grab; a plain headless run uses SDL_VIDEODRIVER=offscreen.
-    # GTK/WebKit are deliberately absent: the Linux simulator's webview is a
-    # stub that links neither, so they would be ~170MB of dead weight.
-    xvfb \
-    x11-utils \
-    # MCP: stitches recorded frames into an MP4
+    # Simulator: EGL renders offscreen through Mesa's llvmpipe — no GLX, no
+    # X server anywhere in the image. GTK/WebKit are deliberately absent too:
+    # the Linux simulator's webview is a stub that links neither, so they
+    # would be ~170MB of dead weight.
+    # MCP: ffmpeg encodes the frame tap's stream and stitches stills.
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -232,7 +229,14 @@ RUN mkdir -p /gradle-cache /tmp/gradle-warm && \
     rm -rf /gradle-cache/wrapper/dists/*/*/gradle-*/docs /gradle-cache/wrapper/dists/*/*/gradle-*/src && \
     chmod -R 0777 /gradle-cache
 
-ENV DISPLAY=:99
+# Offscreen by default: SDL2 never picks the offscreen driver on its own. The
+# image carries no X server; override to x11 with your own DISPLAY for
+# interactive use.
+ENV SDL_VIDEODRIVER=offscreen
+# audio.* is otherwise a silent no-op in a container: openal-soft refuses its
+# null backend unless told, and with no sound device alcOpenDevice fails and
+# ALmixer never initializes.
+ENV ALSOFT_DRIVERS=null
 ENV SOLAR2D_MCP_ARTIFACT_DIR=/artifacts
 
 COPY build-html5.sh build-android.sh capture.sh /usr/local/bin/
@@ -246,7 +250,7 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 # response. The exact source commit is pinned for reproducible image builds.
 #   fork:     https://github.com/chkuendig/solar2d-mcp
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=a94bc351c7af777c6a4eb0e78697f55ac4f77b94
+ARG SOLAR2D_MCP_REF=e8c69ddcf7c2f0529b6b5a8e583795a92f339e5a
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --no-cache-dir --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \

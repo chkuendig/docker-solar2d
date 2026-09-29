@@ -30,7 +30,7 @@ docker run -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d simulate
 
 # One screenshot: content box pinned, app given delay-ms to reach its scene
 docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
-  -e MYAPP_PREVIEW_SCENE=lobby ghcr.io/chkuendig/solar2d capture lobby 1043x1390 14000
+  -e MYAPP_PREVIEW_SCENE=home ghcr.io/chkuendig/solar2d capture home 320x480 3000
 
 # MCP server over stdio, simulator inside
 docker run -i -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d mcp
@@ -85,11 +85,11 @@ content box pinned, PNG validated — with the app steered by env passthrough:
       - uses: chkuendig/docker-solar2d/.github/actions/capture@v1
         with:
           project: corona
-          label: lobby-4x3
-          screen: 1043x1390
-          delay-ms: 14000
+          label: home-portrait
+          screen: 320x480
+          delay-ms: 3000
           env: |
-            MYAPP_DEBUG_PREVIEW=lobby
+            MYAPP_DEBUG_PREVIEW=home
             MYAPP_PREVIEW_LANG=de
 ```
 
