@@ -130,6 +130,33 @@ Without a keystore the Android build is signed with Android's public debug key:
 installable, not distributable. Pass `ANDROID_KEYSTORE_BASE64` and friends to sign
 for real — see `build-android.sh` for the full list.
 
+## Driving the headless simulator from outside
+
+Two opt-in channels exist on simulator builds, both FIFOs the container
+(or host) provides and the engine serves — no server, no Python:
+
+```bash
+docker run -d --name sim ghcr.io/chkuendig/solar2d simulate
+mkdir -p /tmp/tap
+docker run -d --name sim \
+  -e SOLAR2D_VIDEO_PIPE=/dev/shm/video.fifo \
+  -e SOLAR2D_INPUT_PIPE=/dev/shm/input.fifo \
+  -v /tmp/tap:/dev/shm \
+  ghcr.io/chkuendig/solar2d simulate
+
+# video: every frame after a reader attaches, 64-byte header + raw BGRA;
+# probe <path>.ready, never the FIFO itself
+ffmpeg -f rawvideo -pixel_format bgr0 -video_size WxH -framerate N \
+  -i /tmp/tap/video.fifo -vf vflip -c:v libx264 -preset ultrafast out.mp4
+
+# input: one command per line, content coordinates, dispatched as real SDL
+# events (real hit-testing); each dispatch acks as [INPUT] on stdout
+echo "tap 150 250" > /tmp/tap/input.fifo
+echo "drag 100 100 100 400 500" > /tmp/tap/input.fifo
+```
+
+Full wire format and command grammar: `docs/offscreen-capture-design.md`.
+
 An HTML5 build merges anything mounted at `/html5-custom` into the web template, so
 you can ship your own `index.html`, icons and manifest.
 
