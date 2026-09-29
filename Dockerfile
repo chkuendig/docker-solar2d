@@ -250,7 +250,7 @@ RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/
 # response. The exact source commit is pinned for reproducible image builds.
 #   fork:     https://github.com/chkuendig/solar2d-mcp
 #   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=e8c69ddcf7c2f0529b6b5a8e583795a92f339e5a
+ARG SOLAR2D_MCP_REF=f1efc5fd8d6913d51d789c52db0009341cebd3c8
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
     pip3 install --no-cache-dir --break-system-packages \
       "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
