@@ -254,13 +254,15 @@ Every smart bit lives in the consumer, testable without rebuilding the engine.
      -fps_mode cfr -r <fps>` on the output side (a 60 fps app recorded at 30
      yields a 30 s video for 30 s of wall clock, with duplication exactly
      where frames were dropped — review B4), and **fragmented MP4 output**
-     (`-movflags +frag_keyframe+empty_moov+default_base_moof`, not
-     `+faststart`) with a short keyint so fragments close about once a second
-     — a SIGKILL of the whole run loses at most ~1s of tail, which is the
-     evidence a harness hang-detector kill wants. Note: `-preset ultrafast`
-     disables scenecut, so without the short keyint fragments only close at
-     the default 250-frame GOP (~8s of tail). Encode otherwise unchanged
-     (`libx264 ultrafast crf 20`).
+     for kill-survival: `-movflags +frag_keyframe+empty_moov+default_base_moof`
+     with `-frag_duration 1000000` (a pure muxer knob — the ~1s cadence holds
+     at any clamped fps, and it cuts mid-GOP) **and `-flush_packets 1`** —
+     without it, fragments close on schedule but sit in avio's userspace
+     buffer and the kill-tail bound is "however long 32KB takes", not a time
+     bound. Measured: first `moof` on disk ~1.3s after start. Caveat: if the
+     app stops presenting frames (a true hang), the open fragment holds only
+     the sub-second pre-hang remainder — nothing can flush frames the tap
+     never emitted. Encode otherwise unchanged (`libx264 ultrafast crf 20`).
   4. `bgr0` (alpha is meaningless).
 - `stop`: signal the relay (which closes ffmpeg's stdin → clean finalize).
   ffmpeg never blocks in `open()` because only the relay touches the FIFO.
