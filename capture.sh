@@ -136,10 +136,12 @@ find "$SANDBOX" -name "$LABEL.png" -exec cp {} "$OUT/" \;
     exit 1
 }
 
-# A file is not a capture: the PNG signature, its IEND, a floor on the size
-# (a uniform frame is ~5k at 320x480; a rendered screen does not come in
-# under 8k) and the declared dimensions separate real captures from
-# truncated or blank writes.
+# A file is not a capture: the PNG signature, its IEND, and the declared
+# dimensions separate real captures from truncated or empty writes. A byte
+# floor cannot be fatal here — a solid-colour screen is a legitimate capture
+# and compresses to very few bytes (~1.6k at 320x480) — so size is advisory
+# only. Consumers whose screens are never uniform can enforce their own
+# floor on the output.
 bytes=$(wc -c < "$OUT/$LABEL.png")
 magic=$(od -An -tu1 -N8 "$OUT/$LABEL.png" | tr -s ' ' | sed 's/^ //;s/ *$//')
 [ "$magic" = "137 80 78 71 13 10 26 10" ] || {
@@ -149,10 +151,6 @@ magic=$(od -An -tu1 -N8 "$OUT/$LABEL.png" | tr -s ' ' | sed 's/^ //;s/ *$//')
 tail_bytes=$(od -An -tu1 -j "$((bytes - 8))" -N8 "$OUT/$LABEL.png" | tr -s ' ' | sed 's/^ //;s/ *$//')
 [ "$tail_bytes" = "73 69 78 68 174 66 96 130" ] || {
     echo "capture: $LABEL.png stops before its IEND — the write did not finish ($bytes bytes)" >&2
-    exit 1
-}
-[ "$bytes" -ge 8192 ] || {
-    echo "capture: $LABEL.png is $bytes bytes, too small to hold a rendered screen" >&2
     exit 1
 }
 size=$(od -An -tu1 -j16 -N8 "$OUT/$LABEL.png" | awk '{
