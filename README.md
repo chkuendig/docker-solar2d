@@ -196,7 +196,21 @@ upstream:
 
 A new Solar2D release needs a matching `linux-<tag>` branch on the fork before the
 image can build. That is deliberate — the build fails with a clear message rather
-than quietly producing an unpatched tree.
+than quietly producing an unpatched tree. The weekly publish run is therefore the
+signal that a release has landed. To cut the branch, start from the release tag and
+cherry-pick the previous `linux-<tag>` branch's commits onto it. Then check that the
+new branch changes the same files the same way as the old one did:
+
+```bash
+git switch -c linux-<new> <new>
+git cherry-pick -x <old>..linux-<old>
+diff <(git diff <old> linux-<old>) <(git diff <new> HEAD)   # empty
+```
+
+Upstream fixes to the HTML5 runtime reach the image only through `SOLAR2D_VERSION`,
+not through the fork branch: the WASM engine comes from that release's MSI (below).
+Before you count on such a fix, check that the release tag contains it:
+`git merge-base --is-ancestor <fix> <tag>`.
 
 ## Build args
 
