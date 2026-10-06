@@ -6,11 +6,13 @@ on:
     paths:
       - ".github/actions/**"
       - ".github/workflows/test-actions.yml"
+      - "walk.sh"
       - "capture.sh"
   pull_request:
     paths:
       - ".github/actions/**"
       - ".github/workflows/test-actions.yml"
+      - "walk.sh"
       - "capture.sh"
   workflow_dispatch:
 
@@ -82,12 +84,12 @@ jobs:
           test -f out/android/Sample.apk
           test -f out/android/Sample.aab
 
-  capture:
+  walk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Create sample project
+      - name: Create sample project and steps
         run: |
           mkdir -p sample
           echo "settings = {}" > sample/build.settings
@@ -97,21 +99,63 @@ jobs:
               content = { width = 320, height = 480, scale = "letterbox" },
           }
           EOF
+          # Red at boot, blue after a tap, green after Enter — each step
+          # must leave a visibly different frame, and each prints a marker
+          # the walk waits on. (Solar2D names the Return key "enter".)
           cat > sample/main.lua <<'EOF'
           local bg = display.newRect(display.contentCenterX, display.contentCenterY, 600, 900)
           bg:setFillColor(1, 0, 0)
-          timer.performWithDelay(2000, function() bg:setFillColor(0, 0, 1) end)
+          local taps = 0
+          Runtime:addEventListener("touch", function(e)
+              if e.phase == "ended" then
+                  taps = taps + 1
+                  bg:setFillColor(0, 0, 1)
+                  print("[APP] tap " .. taps .. " at " .. math.floor(e.x) .. "," .. math.floor(e.y))
+              end
+              return false
+          end)
+          Runtime:addEventListener("key", function(e)
+              if e.phase == "down" and e.keyName == "enter" then
+                  bg:setFillColor(0, 1, 0)
+                  print("[APP] return pressed")
+              end
+              return false
+          end)
+          EOF
+          cat > sample/walk.steps <<'EOF'
+          fail [APP] never printed
+          wait 2000
+          snap red
+          tap 160 240
+          expect [APP] tap 1 at 160,240
+          snap blue
+          key return
+          expect [APP] return pressed
+          snap green
           EOF
 
-      # Release 3734 carries the offscreen surface sizing required by capture.
-      - uses: ./.github/actions/capture
+      # Release 3734 carries the input FIFO, frame tap and offscreen sizing
+      # the walk needs; the action brings its own walk.sh.
+      - uses: ./.github/actions/walk
         with:
           project: sample
-          output: out/captures
-          label: home-320x480
+          steps: sample/walk.steps
+          output: out/walk
           screen: 320x480
-          delay-ms: 4000
+          video: "true"
           image: ghcr.io/chkuendig/solar2d:3734
 
       - name: Check output
-        run: test -f out/captures/home-320x480.png
+        run: |
+          set -e
+          for f in red blue green; do test -f "out/walk/$f.png"; done
+          test -s out/walk/walk.mp4
+          # Three different frames, not three copies of the first one.
+          [ "$(md5sum out/walk/*.png | cut -d' ' -f1 | sort -u | wc -l)" = "3" ]
+          # Each snapshot is the colour its step promised (centre pixel).
+          px() { ffmpeg -v error -i "out/walk/$1.png" -vf crop=1:1:160:240 -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s ' ' | sed 's/^ //'; }
+          [ "$(px red)"   = "255 0 0" ]
+          [ "$(px blue)"  = "0 0 255" ]
+          [ "$(px green)" = "0 255 0" ]
+          # Outputs belong to the runner's uid, never root.
+          [ "$(stat -c %u out/walk/red.png)" = "$(id -u)" ]

@@ -14,6 +14,10 @@ case "${1:-}" in
     shift
     exec capture.sh "$@"
     ;;
+  walk)
+    shift
+    exec walk.sh "$@"
+    ;;
   simulate)
     shift
     PROJECT="${1:-/project/main.lua}"
@@ -38,6 +42,7 @@ case "${1:-}" in
     echo "  build          Build HTML5 (WebAssembly) output"
     echo "  build-android  Build Android APK + AAB"
     echo "  capture        One screenshot from the headless simulator (no X)"
+    echo "  walk           Drive the app through input steps, snapshot per step"
     echo "  simulate       Run the simulator headless (offscreen EGL)"
     echo "  runtime        Keep a warm container for docker exec callers"
     echo ""

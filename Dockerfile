@@ -246,9 +246,9 @@ ENV SDL_VIDEODRIVER=offscreen
 # ALmixer never initializes.
 ENV ALSOFT_DRIVERS=null
 
-COPY build-html5.sh build-android.sh capture.sh /usr/local/bin/
+COPY build-html5.sh build-android.sh capture.sh walk.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/capture.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/capture.sh /usr/local/bin/walk.sh /usr/local/bin/entrypoint.sh
 
 LABEL org.opencontainers.image.source=https://github.com/chkuendig/docker-solar2d
 

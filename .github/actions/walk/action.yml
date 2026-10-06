@@ -1,0 +1,134 @@
+name: "Walk App"
+description: >-
+  Drive a Solar2D project through a steps file in the headless simulator
+  (offscreen EGL, no X server): taps, drags, keys and text are dispatched as
+  real SDL events, every step waits for its ack or for a marker the app
+  prints, and each `snap` saves a named PNG — optionally with an MP4 of the
+  whole walk. Needs release 3734 or newer; pin the image input to a release
+  or digest. How the app reaches each screen stays the project's business:
+  its own env vars reach it unchanged through `env`.
+inputs:
+  project:
+    description: "Solar2D project directory, relative to the workspace root"
+    required: true
+  output:
+    description: "Directory the PNGs (and walk.mp4) land in, relative to the workspace root"
+    required: false
+    default: "walk"
+  steps:
+    description: >-
+      Path to the steps file, relative to the workspace root. One step per
+      line: `wait <ms>`, `expect <marker>`, `fail <marker>`, `snap <label>`,
+      or an input command (`tap x y`, `wtap x y`, `drag x1 y1 x2 y2 [ms]`,
+      `key <sdl-name>`, `text <string>`); # comments allowed. Coordinates are
+      content units.
+    required: true
+  screen:
+    description: "Content box to pin, WxH (e.g. 320x480)"
+    required: false
+    default: "320x480"
+  video:
+    description: >-
+      Record the whole walk as walk.mp4 alongside the snapshots (content box
+      only, 15 fps, fragmented so a killed run still plays)
+    required: false
+    default: "false"
+  expect-timeout-ms:
+    description: "How long an `expect` step waits for its marker before failing the walk"
+    required: false
+    default: "30000"
+  env:
+    description: >-
+      Multiline KEY=VALUE list forwarded into the simulator (scene selection,
+      fixtures, seeds). Reserved names are rejected (PATH, HOME, LD_*, SDL_*,
+      SOLAR2D_WALK_*, GITHUB_*, RUNNER_*). Values must not be secrets.
+    required: false
+    default: ""
+  image:
+    description: "solar2d Docker image to run"
+    required: false
+    default: "ghcr.io/chkuendig/solar2d:latest"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        ACTION_PATH: ${{ github.action_path }}
+        PROJECT: ${{ inputs.project }}
+        OUTPUT: ${{ inputs.output }}
+        STEPS: ${{ inputs.steps }}
+        SCREEN: ${{ inputs.screen }}
+        VIDEO: ${{ inputs.video }}
+        EXPECT_MS: ${{ inputs.expect-timeout-ms }}
+        PASSTHROUGH: ${{ inputs.env }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -d "$GITHUB_WORKSPACE/$PROJECT" ]; then
+          echo "::error::project directory '$PROJECT' not found under the workspace root"
+          exit 1
+        fi
+        if [ ! -f "$GITHUB_WORKSPACE/$STEPS" ]; then
+          echo "::error::steps file '$STEPS' not found under the workspace root"
+          exit 1
+        fi
+        if ! [[ "$SCREEN" =~ ^[0-9]+x[0-9]+$ ]]; then
+          echo "::error::screen '$SCREEN' is not <width>x<height>"
+          exit 1
+        fi
+        if ! [[ "$EXPECT_MS" =~ ^[0-9]+$ ]]; then
+          echo "::error::expect-timeout-ms '$EXPECT_MS' is not a number"
+          exit 1
+        fi
+
+        ENV_FILE=$(mktemp)
+        trap 'rm -f "$ENV_FILE"' EXIT
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          if ! [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            echo "::error::env entry '${line%%=*}' is not KEY=VALUE"
+            exit 1
+          fi
+          key="${BASH_REMATCH[1]}"
+          case "$key" in
+            PATH|HOME|LD_*|SDL_*|SOLAR2D_WALK_*|GITHUB_*|RUNNER_*)
+              echo "::error::env key '$key' is reserved"
+              exit 1
+              ;;
+          esac
+          printf '%s\n' "$line" >> "$ENV_FILE"
+        done <<< "$PASSTHROUGH"
+
+        mkdir -p "$GITHUB_WORKSPACE/$OUTPUT"
+
+        WALK_VIDEO=0
+        [ "$VIDEO" = "true" ] && WALK_VIDEO=1
+
+        # The walk script is mounted from the action itself and run as the
+        # entrypoint, not taken from the image: the action then works against
+        # any image whose simulator has the input FIFO, including releases
+        # that predate the walk command, and the script version is pinned by
+        # the same commit as this file. The image ships its own copy for raw
+        # `docker run` users; keep the two in sync.
+        docker run --rm \
+          --cpus 1.5 --memory 1g \
+          --user "$(id -u):$(id -g)" \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -v "$ACTION_PATH/walk.sh:/usr/local/bin/walk.sh:ro" \
+          --entrypoint /usr/local/bin/walk.sh \
+          --env-file "$ENV_FILE" \
+          -e HOME=/tmp \
+          -e SDL_VIDEODRIVER=offscreen \
+          -e SOLAR2D_WALK_PROJECT="$GITHUB_WORKSPACE/$PROJECT" \
+          -e SOLAR2D_WALK_OUT="$GITHUB_WORKSPACE/$OUTPUT" \
+          -e SOLAR2D_WALK_SCREEN="$SCREEN" \
+          -e SOLAR2D_WALK_VIDEO="$WALK_VIDEO" \
+          -e SOLAR2D_WALK_EXPECT_MS="$EXPECT_MS" \
+          "$IMAGE" \
+          "$GITHUB_WORKSPACE/$STEPS" 2>&1 | sed 's/^/  /'
+
+
+        # walk.sh validated each PNG inside the container; this proves they
+        # reached the workspace.
+        ls "$GITHUB_WORKSPACE/$OUTPUT"/*.png >/dev/null

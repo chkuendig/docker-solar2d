@@ -75,24 +75,44 @@ The action ref selects its code; the `image` input selects the Solar2D release
 it runs. For reproducible CI, pin an action commit and an image release or
 digest, such as `ghcr.io/chkuendig/solar2d:3734`.
 
-A `capture` action takes one screenshot the same way — offscreen simulator,
-content box pinned, PNG validated — with the app steered by env passthrough:
+A `walk` action drives the headless simulator through a steps file and
+saves a named PNG per `snap` — offscreen, content box pinned, every input
+dispatched as a real SDL event and every step waiting for its ack or for a
+marker the app prints:
 
 ```yaml
-      - uses: chkuendig/docker-solar2d/.github/actions/capture@main
+      - uses: chkuendig/docker-solar2d/.github/actions/walk@main
         with:
           project: corona
-          label: home-portrait
+          steps: ci/home.walk
+          output: screenshots
           screen: 320x480
-          delay-ms: 3000
+          video: "true"           # also screenshots/walk.mp4
           env: |
             MYAPP_DEBUG_PREVIEW=home
             MYAPP_PREVIEW_LANG=de
 ```
 
-How the app reaches the scene you want at `delay-ms` stays the project's
-business: `capture` pins geometry and timing, your preview hook picks the
-scene through whatever env vars it already reads.
+```text
+# ci/home.walk — one step per line
+fail MYAPP_DEFECT                 # abort the moment the app prints this
+wait 3000                         # let it boot and settle
+snap home                         # -> screenshots/home.png
+tap 160 420                       # content coordinates, real hit-testing
+expect [APP] settings shown       # block until the app prints the marker
+snap settings
+key escape                        # SDL key names; the app sees Solar2D
+                                  # names (SDL "return" -> keyName "enter")
+drag 160 400 160 100 400          # press, move over 400ms, release
+snap scrolled
+```
+
+A single screenshot is a two-line walk (`wait <ms>`, `snap <label>`); the
+image's `capture` command is exactly that. How the app reaches each screen
+stays the project's business: the walk pins geometry and sequencing, your
+preview hook picks the scene through whatever env vars it already reads, and
+your stdout markers are what `expect` and `fail` wait on. Needs release 3734
+or newer.
 
 ### Warm runtime
 
@@ -157,7 +177,7 @@ it pulls from a fork that is part of the supply chain:
 
 | Repo | Branch | Why |
 |---|---|---|
-| [`chkuendig/docker-solar2d`](https://github.com/chkuendig/docker-solar2d) | `main` | Image, build scripts, and capture actions |
+| [`chkuendig/docker-solar2d`](https://github.com/chkuendig/docker-solar2d) | `main` | Image, build scripts, and the build and walk actions |
 | [`chkuendig/corona`](https://github.com/chkuendig/corona) | `linux-<tag>` (currently `linux-3734`) | Solar2D with the Linux gaps closed |
 
 The Solar2D fork carries Linux fixes on its release branches, with focused
