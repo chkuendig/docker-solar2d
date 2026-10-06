@@ -96,6 +96,7 @@ runs:
         # absolute path. Project and output locations are passed as env, which
         # capture.sh reads; caller env rides the env-file.
         docker run --rm \
+          --user "$(id -u):$(id -g)" \
           --cpus 1.5 --memory 1g \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
           --env-file "$ENV_FILE" \

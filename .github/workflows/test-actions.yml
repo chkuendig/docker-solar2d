@@ -41,7 +41,12 @@ jobs:
           app-name: Sample
 
       - name: Check output
-        run: test -f out/html5/Sample.html5/index.html
+        run: |
+          test -f out/html5/Sample.html5/index.html
+          # The actions run the container as the runner's uid: outputs must
+          # already belong to it — a root-owned file here would send every
+          # consumer back to "sudo chown" after container steps.
+          [ "$(stat -c %u "out/html5/Sample.html5/index.html")" = "$(id -u)" ]
 
   android:
     runs-on: ubuntu-latest

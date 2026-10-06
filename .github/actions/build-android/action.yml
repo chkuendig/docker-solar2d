@@ -83,6 +83,7 @@ runs:
         # are forwarded name-only (-e NAME) from the caller's environment:
         # they never appear on a command line in the logs.
         docker run --rm \
+          --user "$(id -u):$(id -g)" \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
           -e BUILD_VERSION \
           -e ANDROID_KEYSTORE_BASE64 \

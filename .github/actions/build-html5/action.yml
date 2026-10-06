@@ -67,6 +67,7 @@ runs:
         # name-only (-e NAME) so caller-provided secrets never appear on a
         # command line in the logs.
         docker run --rm \
+          --user "$(id -u):$(id -g)" \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
           "${MOUNTS[@]}" \
           -e BUILD_VERSION \
