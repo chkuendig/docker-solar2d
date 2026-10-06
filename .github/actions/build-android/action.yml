@@ -24,7 +24,7 @@ inputs:
     description: "Application id, e.g. com.example.myapp"
     required: true
   version-code:
-    description: "Integer versionCode; use ${{ github.run_number }} for one per run"
+    description: "Integer versionCode; pass the workflow run number for one per run"
     required: false
     default: "1"
   store:
