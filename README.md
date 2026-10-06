@@ -5,7 +5,7 @@ a **headless simulator**, and an **MCP server** for driving it.
 
 ```
 ghcr.io/chkuendig/solar2d:latest
-ghcr.io/chkuendig/solar2d:3731     # pinned to a Solar2D release
+ghcr.io/chkuendig/solar2d:3734     # pinned to a Solar2D release
 ```
 
 Solar2D ships no Linux builder. The official HTML5 and Android tooling is macOS and
@@ -48,12 +48,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: chkuendig/docker-solar2d/.github/actions/build-html5@v1
+      - uses: chkuendig/docker-solar2d/.github/actions/build-html5@main
         with:
           project: corona
           app-name: MyApp
 
-      - uses: chkuendig/docker-solar2d/.github/actions/build-android@v1
+      - uses: chkuendig/docker-solar2d/.github/actions/build-android@main
         with:
           project: corona
           app-name: MyApp
@@ -74,15 +74,15 @@ workspace-relative paths. Signing credentials travel through `env`, never
 `with` — GitHub can mask secrets in logs but not in input values rendered into
 workflow UIs.
 
-Pin the `image` input (`ghcr.io/chkuendig/solar2d:3731`) alongside the action
-ref: `@v1` selects the action's code, the image tag selects the Solar2D
-release it runs.
+The action ref selects its code; the `image` input selects the Solar2D release
+it runs. For reproducible CI, pin an action commit and an image release or
+digest, such as `ghcr.io/chkuendig/solar2d:3734`.
 
 A `capture` action takes one screenshot the same way — offscreen simulator,
 content box pinned, PNG validated — with the app steered by env passthrough:
 
 ```yaml
-      - uses: chkuendig/docker-solar2d/.github/actions/capture@v1
+      - uses: chkuendig/docker-solar2d/.github/actions/capture@main
         with:
           project: corona
           label: home-portrait
@@ -99,8 +99,8 @@ scene through whatever env vars it already reads.
 
 ### Warm MCP runtime
 
-Keep Xvfb and the image warm, then start one bounded stdio server per MCP
-client with `docker exec`:
+Keep the image warm, then start one bounded stdio server per MCP client with
+`docker exec`. Each simulator renders through its own offscreen EGL surface:
 
 ```bash
 mkdir -p /tmp/solar2d-review
@@ -123,8 +123,8 @@ command defaults to a 20-minute limit; set `SOLAR2D_MCP_SESSION_TIMEOUT` on the
 runtime container if a different bound is needed. SIGTERM and normal disconnect
 both stop only the owning session's simulator before releasing its slot.
 
-Do not enable parallel simulators yet. They still require separate displays,
-homes/Solar2D sandboxes, temporary directories, and per-slot resource accounting.
+Do not enable parallel simulators yet. They still require separate homes/Solar2D
+sandboxes, temporary directories, and per-slot resource accounting.
 
 Without a keystore the Android build is signed with Android's public debug key:
 installable, not distributable. Pass `ANDROID_KEYSTORE_BASE64` and friends to sign
@@ -136,25 +136,26 @@ Two opt-in channels exist on simulator builds, both FIFOs the container
 (or host) provides and the engine serves — no server, no Python:
 
 ```bash
-docker run -d --name sim ghcr.io/chkuendig/solar2d simulate
 mkdir -p /tmp/tap
 docker run -d --name sim \
   -e SOLAR2D_VIDEO_PIPE=/dev/shm/video.fifo \
   -e SOLAR2D_INPUT_PIPE=/dev/shm/input.fifo \
+  -v "$(pwd)/corona:/project:ro" \
   -v /tmp/tap:/dev/shm \
   ghcr.io/chkuendig/solar2d simulate
 
 # video: every frame after a reader attaches, 64-byte header + raw BGRA;
 # probe <path>.ready, never the FIFO itself
-ffmpeg -f rawvideo -pixel_format bgr0 -video_size WxH -framerate N \
-  -i /tmp/tap/video.fifo -vf vflip -c:v libx264 -preset ultrafast out.mp4
 
 # input: one command per line, content coordinates, dispatched as real SDL
 # events (real hit-testing); each dispatch acks as [INPUT] on stdout
-echo "tap 150 250" > /tmp/tap/input.fifo
-echo "drag 100 100 100 400 500" > /tmp/tap/input.fifo
+docker exec sim sh -c 'printf "tap 150 250\n" > /dev/shm/input.fifo'
+docker exec sim sh -c 'printf "drag 100 100 100 400 500\n" > /dev/shm/input.fifo'
 ```
 
+Video readers must decode each frame's header before feeding its BGRA payload
+to ffmpeg. For projects launched through MCP, `start_video_recording` and
+`stop_video_recording` provide that relay, wall-clock pacing, and MP4 finalization.
 Full wire format and command grammar: `docs/offscreen-capture-design.md`.
 
 An HTML5 build merges anything mounted at `/html5-custom` into the web template, so
@@ -177,11 +178,15 @@ it pulls from two forks that are part of the supply chain:
 
 | Repo | Branch | Why |
 |---|---|---|
-| [`chkuendig/corona`](https://github.com/chkuendig/corona) | `linux-<tag>` | Solar2D with the Linux gaps closed |
-| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `linux-fixes` | MCP server with Linux launch fixes and shared-runtime coordination |
+| [`chkuendig/docker-solar2d`](https://github.com/chkuendig/docker-solar2d) | `main` | Image, build scripts, and capture actions |
+| [`chkuendig/corona`](https://github.com/chkuendig/corona) | `linux-<tag>` (currently `linux-3734`) | Solar2D with the Linux gaps closed |
+| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `main` | Linux launch fixes, shared-runtime coordination, and relay recording |
 
-The Solar2D fork carries three changes, each also on its own branch for offering
-upstream:
+The Dockerfile pins an exact MCP source commit, also retained on `video-tap`
+for image rebuilds.
+
+The Solar2D fork carries Linux fixes on its release branches, with focused
+branches for offering individual changes upstream:
 
 - **HTML5 builder** — `CORONABUILDER_HTML5` in the Linux CMake. Without it the binary
   answers *"building for HTML5 is not supported on this operating system"*, despite
@@ -193,6 +198,9 @@ upstream:
   blue taken from the alpha byte. `CaptureFrameBuffer` reads with a *packed*
   `GL_UNSIGNED_INT_8_8_8_8`, so the bytes land as ARGB, and the PNG writer was told
   they were BGRA byte order. macOS and Windows have their own writers and never saw it.
+- **Offscreen capture and input** — resize the EGL surface to the requested window
+  dimensions, stream video frames through a FIFO, and dispatch injected input as
+  native SDL events.
 
 A new Solar2D release needs a matching `linux-<tag>` branch on the fork before the
 image can build. That is deliberate — the build fails with a clear message rather
@@ -216,7 +224,7 @@ Before you count on such a fix, check that the release tag contains it:
 
 | Arg | Purpose |
 |---|---|
-| `SOLAR2D_VERSION` | Release to build, e.g. `2026.3731`. Picks the MSI and the default fork branch |
+| `SOLAR2D_VERSION` | Release to build, e.g. `2026.3734`. Picks the MSI and the default fork branch |
 | `SOLAR2D_REPO` / `SOLAR2D_REF` | Build a different tree or branch — an upstream tag, a PR branch, another fork |
 | `SOLAR2D_REF_SHA` | Expected commit of that branch. Verified after cloning, and busts the layer cache when the branch moves |
 | `SOLAR2D_PRS` | Space-separated upstream PR numbers, applied as diffs — e.g. `891`. For trying a PR without committing to it |
@@ -228,8 +236,8 @@ building last week's tree — silently. CI resolves the branch head and passes i
 Building by hand after pushing to the branch, do the same or use `--no-cache`:
 
 ```bash
-docker build --build-arg SOLAR2D_VERSION=2026.3731 \
-  --build-arg SOLAR2D_REF_SHA=$(gh api repos/chkuendig/corona/commits/linux-3731 --jq .sha) \
+docker build --build-arg SOLAR2D_VERSION=2026.3734 \
+  --build-arg SOLAR2D_REF_SHA=$(gh api repos/chkuendig/corona/commits/linux-3734 --jq .sha) \
   -t solar2d .
 ```
 
@@ -246,8 +254,8 @@ tree does not build either.
 
 - Solar2D's iOS packager shells out to `xcodebuild` and `codesign`, so **iOS cannot be
   containerised**. It needs macOS.
-- The simulator uses a lot of CPU: the GL render loop is uncapped, Xvfb has no vsync
-  and llvmpipe has no frame limiter. `config.lua`'s `fps` limits the Lua loop, not the
+- The simulator uses a lot of CPU: the offscreen GL render loop is uncapped and
+  llvmpipe has no frame limiter. `config.lua`'s `fps` limits the Lua loop, not the
   renderer. Cap it with `--cpus`, and stop it when you are done.
 
 ## Licence
