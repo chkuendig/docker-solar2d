@@ -178,7 +178,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=compile /opt/solar2d/build/Solar2DBuilder /usr/local/bin/Solar2DBuilder
 COPY --from=compile /opt/solar2d/build/Solar2DSimulator /usr/local/bin/Solar2DSimulator
 COPY --from=compile /opt/solar2d/build/Resources/ /usr/local/share/solar2d/Resources/
-RUN ln -s /usr/local/share/solar2d/Resources /usr/local/bin/Resources
+# The Android Gradle template launches Resources/../Solar2DBuilder. Following
+# the Resources symlink makes that sibling live under share/solar2d, so keep
+# a builder alias there as well.
+RUN ln -s /usr/local/share/solar2d/Resources /usr/local/bin/Resources && \
+    ln -s /usr/local/bin/Solar2DBuilder /usr/local/share/solar2d/Solar2DBuilder
 
 # Android SDK. compileSdk/targetSdk are 35 in Solar2D's Gradle template; build-tools
 # must match. android-36 is installed next to it because a project can raise its own
