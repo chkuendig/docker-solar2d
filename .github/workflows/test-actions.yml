@@ -98,8 +98,7 @@ jobs:
           timer.performWithDelay(2000, function() bg:setFillColor(0, 0, 1) end)
           EOF
 
-      # capture needs the offscreen surface sizing from the fork's frame-tap
-      # branches; pin the candidate until a release image carries them.
+      # Release 3734 carries the offscreen surface sizing required by capture.
       - uses: ./.github/actions/capture
         with:
           project: sample
@@ -107,7 +106,7 @@ jobs:
           label: home-320x480
           screen: 320x480
           delay-ms: 4000
-          image: ghcr.io/chkuendig/solar2d:frame-tap-candidate
+          image: ghcr.io/chkuendig/solar2d:3734
 
       - name: Check output
         run: test -f out/captures/home-320x480.png

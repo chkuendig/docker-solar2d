@@ -40,7 +40,7 @@ jobs:
         run: |
           docker pull "$IMAGE"
           docker image inspect "$IMAGE" --format '{{json .RepoDigests}} {{json .Config.Labels}}'
-          docker run --rm --entrypoint sh "$IMAGE" -c '
+          docker run --rm --entrypoint sh "$IMAGE" -ec '
             grep -a -q SOLAR2D_VIDEO_PIPE /usr/local/bin/Solar2DSimulator
             grep -a -q SOLAR2D_INPUT_PIPE /usr/local/bin/Solar2DSimulator
             echo "Engine contains video and input tap support"
@@ -59,4 +59,3 @@ jobs:
             -v "$GITHUB_WORKSPACE/mcp:/src:ro" -w /src \
             --entrypoint python3 "$IMAGE" \
             -m unittest discover -s tests -v
-

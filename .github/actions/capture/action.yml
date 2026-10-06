@@ -1,8 +1,8 @@
 name: "Capture Screenshot"
 description: >-
   One screenshot of a Solar2D project from the headless simulator (offscreen
-  EGL, no X server). Needs an image built from the fork's frame-tap branches —
-  pin the image input to such a tag/digest until a release image carries them.
+  EGL, no X server). Requires the offscreen surface sizing fixes included in
+  release 3734 and newer; pin the image input to the desired release or digest.
   How the app reaches the scene you want at delay-ms is your project's preview
   hook — env vars listed in `env` reach it unchanged.
 inputs:
