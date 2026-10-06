@@ -79,12 +79,16 @@ runs:
         fi
 
         # The workspace is mounted at its own absolute path so the project,
-        # output and keystore paths keep their runner paths. Signing secrets
+        # output and keystore paths keep their runner paths. The container runs
+        # as the runner's uid, which has no home in the image: HOME points at
+        # writable scratch so Gradle and the Android tools (~/.android, the
+        # debug keystore) have somewhere to write. Signing secrets
         # are forwarded name-only (-e NAME) from the caller's environment:
         # they never appear on a command line in the logs.
         docker run --rm \
           --user "$(id -u):$(id -g)" \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -e HOME=/tmp \
           -e BUILD_VERSION \
           -e ANDROID_KEYSTORE_BASE64 \
           -e ANDROID_KEYSTORE_PASSWORD \

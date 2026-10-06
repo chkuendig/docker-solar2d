@@ -68,6 +68,7 @@ SNAP_CODE="${SOLAR2D_WALK_SNAP_CODE:-1073741928}"
 }
 
 WORK=$(mktemp -d /tmp/solar2d-walk-XXXXXX)
+LOG="$WORK/walk.log"
 SRC="$WORK/project"
 SANDBOX="$HOME/.Solar2D/Sandbox"
 SIM_PID=""
@@ -75,6 +76,10 @@ FFMPEG_PID=""
 cleanup() {
     [ -n "$SIM_PID" ] && kill "$SIM_PID" 2>/dev/null || true
     [ -n "$FFMPEG_PID" ] && kill "$FFMPEG_PID" 2>/dev/null || true
+    # The simulator's full output stays with the snapshots, success or not:
+    # it carries the app's markers and every ack, and is the first thing to
+    # read when a walk fails or a frame surprises.
+    [ -f "$LOG" ] && mkdir -p "$OUT" && cp "$LOG" "$OUT/walk.log" 2>/dev/null || true
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -142,7 +147,6 @@ INPUT_FIFO="$WORK/input.fifo"
 VIDEO_FIFO="$WORK/video.fifo"
 mkfifo "$INPUT_FIFO"
 
-LOG="$WORK/walk.log"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}"
 export SOLAR2D_CAP_WIDTH="$DEVW" SOLAR2D_CAP_HEIGHT="$DEVH"
 export SOLAR2D_WALK_SNAP_KEY="$SNAP_KEY"

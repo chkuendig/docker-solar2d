@@ -152,8 +152,9 @@ jobs:
           test -s out/walk/walk.mp4
           # Three different frames, not three copies of the first one.
           [ "$(md5sum out/walk/*.png | cut -d' ' -f1 | sort -u | wc -l)" = "3" ]
-          # Each snapshot is the colour its step promised (centre pixel).
-          px() { ffmpeg -v error -i "out/walk/$1.png" -vf crop=1:1:160:240 -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s ' ' | sed 's/^ //'; }
+          # Each snapshot is the colour its step promised (centre pixel). The
+          # runner has no ffmpeg; the image does.
+          px() { docker run --rm -v "$PWD/out/walk:/w:ro" --entrypoint ffmpeg ghcr.io/chkuendig/solar2d:3734 -v error -i "/w/$1.png" -vf crop=1:1:160:240 -f rawvideo -pix_fmt rgb24 - | od -An -tu1 | tr -s ' ' | sed 's/^ //'; }
           [ "$(px red)"   = "255 0 0" ]
           [ "$(px blue)"  = "0 0 255" ]
           [ "$(px green)" = "0 255 0" ]

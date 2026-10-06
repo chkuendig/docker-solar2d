@@ -69,6 +69,7 @@ runs:
         docker run --rm \
           --user "$(id -u):$(id -g)" \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          -e HOME=/tmp \
           "${MOUNTS[@]}" \
           -e BUILD_VERSION \
           -e SENTRY_RELEASE \
