@@ -1,0 +1,62 @@
+name: Verify Engine Image
+
+on:
+  push:
+    branches: [ci/verify-engine-image]
+    paths:
+      - ".github/workflows/verify-engine-image.yml"
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Solar2D image to verify"
+        required: false
+        default: "ghcr.io/chkuendig/solar2d:latest"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      IMAGE: ${{ inputs.image || 'ghcr.io/chkuendig/solar2d:latest' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: chkuendig/corona
+          ref: a293abc9be4d5f2d146a8d412da4397b5fcb2668
+          path: engine
+          sparse-checkout: platform/linux/test
+
+      - uses: actions/checkout@v6
+        with:
+          repository: chkuendig/solar2d-mcp
+          ref: f1efc5fd8d6913d51d789c52db0009341cebd3c8
+          path: mcp
+
+      - name: Pull published image and verify tap support
+        run: |
+          docker pull "$IMAGE"
+          docker image inspect "$IMAGE" --format '{{json .RepoDigests}} {{json .Config.Labels}}'
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            grep -a -q SOLAR2D_VIDEO_PIPE /usr/local/bin/Solar2DSimulator
+            grep -a -q SOLAR2D_INPUT_PIPE /usr/local/bin/Solar2DSimulator
+            echo "Engine contains video and input tap support"
+          '
+
+      - name: Verify native input
+        run: bash engine/platform/linux/test/native-input/run.sh "$IMAGE"
+
+      - name: Verify config pixel size
+        run: bash engine/platform/linux/test/config-pixel-size/run.sh "$IMAGE"
+
+      - name: Verify pinned MCP recording and lifecycle regressions
+        run: |
+          docker run --rm --cpus 2 --memory 1g --network none \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$GITHUB_WORKSPACE/mcp:/src:ro" -w /src \
+            --entrypoint python3 "$IMAGE" \
+            -m unittest discover -s tests -v
+
