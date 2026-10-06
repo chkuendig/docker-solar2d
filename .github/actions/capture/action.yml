@@ -1,0 +1,111 @@
+name: "Capture Screenshot"
+description: >-
+  One screenshot of a Solar2D project from the headless simulator (offscreen
+  EGL, no X server). Needs an image built from the fork's frame-tap branches —
+  pin the image input to such a tag/digest until a release image carries them.
+  How the app reaches the scene you want at delay-ms is your project's preview
+  hook — env vars listed in `env` reach it unchanged.
+inputs:
+  project:
+    description: "Solar2D project directory, relative to the workspace root"
+    required: true
+  output:
+    description: "Directory the PNG lands in, relative to the workspace root"
+    required: false
+    default: "captures"
+  label:
+    description: "Capture name; output file is <output>/<label>.png (letters, digits, dot, underscore, dash)"
+    required: true
+  screen:
+    description: "Content box to pin, WxH (e.g. 320x480)"
+    required: false
+    default: "320x480"
+  delay-ms:
+    description: "Milliseconds to let the app run before the frame is saved"
+    required: false
+    default: "3000"
+  env:
+    description: >-
+      Multiline KEY=VALUE list forwarded into the simulator (scene selection,
+      fixtures, seeds). Reserved names are rejected (PATH, HOME, LD_*, SDL_*,
+      SOLAR2D_CAP_*, GITHUB_*, RUNNER_*). Values must not be secrets: docker
+      inspect exposes container env to anyone who can run docker on the
+      runner.
+    required: false
+    default: ""
+  image:
+    description: "solar2d Docker image to run"
+    required: false
+    default: "ghcr.io/chkuendig/solar2d:latest"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PROJECT: ${{ inputs.project }}
+        OUTPUT: ${{ inputs.output }}
+        LABEL: ${{ inputs.label }}
+        SCREEN: ${{ inputs.screen }}
+        DELAY: ${{ inputs.delay-ms }}
+        PASSTHROUGH: ${{ inputs.env }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -d "$GITHUB_WORKSPACE/$PROJECT" ]; then
+          echo "::error::project directory '$PROJECT' not found under the workspace root"
+          exit 1
+        fi
+        if ! [[ "$SCREEN" =~ ^[0-9]+x[0-9]+$ ]]; then
+          echo "::error::screen '$SCREEN' is not <width>x<height>"
+          exit 1
+        fi
+        if ! [[ "$DELAY" =~ ^[0-9]+$ ]]; then
+          echo "::error::delay-ms '$DELAY' is not a number"
+          exit 1
+        fi
+        if ! [[ "$LABEL" =~ ^[A-Za-z0-9._-]+$ ]]; then
+          echo "::error::label '$LABEL' may only contain letters, digits, dot, underscore, dash"
+          exit 1
+        fi
+
+        # Validated caller env goes through an env-file — never exported into
+        # this shell, where it could shadow the step's own variables — and is
+        # rejected outright for reserved names. Only keys are ever printed.
+        ENV_FILE=$(mktemp)
+        trap 'rm -f "$ENV_FILE"' EXIT
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          if ! [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            echo "::error::env entry '${line%%=*}' is not KEY=VALUE"
+            exit 1
+          fi
+          key="${BASH_REMATCH[1]}"
+          case "$key" in
+            PATH|HOME|LD_*|SDL_*|SOLAR2D_CAP_*|GITHUB_*|RUNNER_*)
+              echo "::error::env key '$key' is reserved"
+              exit 1
+              ;;
+          esac
+          printf '%s\n' "$line" >> "$ENV_FILE"
+        done <<< "$PASSTHROUGH"
+
+        mkdir -p "$GITHUB_WORKSPACE/$OUTPUT"
+
+        # Same shape as the build actions: the workspace mounted at its own
+        # absolute path. Project and output locations are passed as env, which
+        # capture.sh reads; caller env rides the env-file.
+        docker run --rm \
+          --cpus 1.5 --memory 1g \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          --env-file "$ENV_FILE" \
+          -e HOME=/tmp \
+          -e SDL_VIDEODRIVER=offscreen \
+          -e SOLAR2D_CAP_PROJECT="$GITHUB_WORKSPACE/$PROJECT" \
+          -e SOLAR2D_CAP_OUT="$GITHUB_WORKSPACE/$OUTPUT" \
+          "$IMAGE" \
+          capture "$LABEL" "$SCREEN" "$DELAY" 2>&1 | sed 's/^/  /'
+
+        # capture.sh validated the PNG inside the container; this proves the
+        # file reached the workspace.
+        test -f "$GITHUB_WORKSPACE/$OUTPUT/$LABEL.png"

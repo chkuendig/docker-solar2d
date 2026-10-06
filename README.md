@@ -25,12 +25,77 @@ docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
 docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
   ghcr.io/chkuendig/solar2d build-android --app-name MyApp --package com.example.myapp
 
-# Headless simulator (Xvfb)
+# Headless simulator — offscreen EGL, no X server
 docker run -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d simulate
+
+# One screenshot: content box pinned, app given delay-ms to reach its scene
+docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
+  -e MYAPP_PREVIEW_SCENE=home ghcr.io/chkuendig/solar2d capture home 320x480 3000
 
 # MCP server over stdio, simulator inside
 docker run -i -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d mcp
 ```
+
+### From GitHub Actions
+
+Both build steps ship as composite actions, so a workflow does not hand-write
+`docker run` and its volume mounts:
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: chkuendig/docker-solar2d/.github/actions/build-html5@v1
+        with:
+          project: corona
+          app-name: MyApp
+
+      - uses: chkuendig/docker-solar2d/.github/actions/build-android@v1
+        with:
+          project: corona
+          app-name: MyApp
+          package: com.example.myapp
+          version-code: ${{ github.run_number }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          ANDROID_KEYSTORE_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_ALIAS_PASSWORD }}
+```
+
+Inputs map one-to-one onto the build scripts' flags (`project`, `output`,
+`app-name`, `app-version`, `html5-custom`, and on Android `package`,
+`version-code`, `store`, `keystore`). The workspace is mounted into the
+container at its own absolute path, so those inputs are plain
+workspace-relative paths. Signing credentials travel through `env`, never
+`with` — GitHub can mask secrets in logs but not in input values rendered into
+workflow UIs.
+
+Pin the `image` input (`ghcr.io/chkuendig/solar2d:3731`) alongside the action
+ref: `@v1` selects the action's code, the image tag selects the Solar2D
+release it runs.
+
+A `capture` action takes one screenshot the same way — offscreen simulator,
+content box pinned, PNG validated — with the app steered by env passthrough:
+
+```yaml
+      - uses: chkuendig/docker-solar2d/.github/actions/capture@v1
+        with:
+          project: corona
+          label: home-portrait
+          screen: 320x480
+          delay-ms: 3000
+          env: |
+            MYAPP_DEBUG_PREVIEW=home
+            MYAPP_PREVIEW_LANG=de
+```
+
+How the app reaches the scene you want at `delay-ms` stays the project's
+business: `capture` pins geometry and timing, your preview hook picks the
+scene through whatever env vars it already reads.
 
 ### Warm MCP runtime
 
@@ -65,6 +130,33 @@ Without a keystore the Android build is signed with Android's public debug key:
 installable, not distributable. Pass `ANDROID_KEYSTORE_BASE64` and friends to sign
 for real — see `build-android.sh` for the full list.
 
+## Driving the headless simulator from outside
+
+Two opt-in channels exist on simulator builds, both FIFOs the container
+(or host) provides and the engine serves — no server, no Python:
+
+```bash
+docker run -d --name sim ghcr.io/chkuendig/solar2d simulate
+mkdir -p /tmp/tap
+docker run -d --name sim \
+  -e SOLAR2D_VIDEO_PIPE=/dev/shm/video.fifo \
+  -e SOLAR2D_INPUT_PIPE=/dev/shm/input.fifo \
+  -v /tmp/tap:/dev/shm \
+  ghcr.io/chkuendig/solar2d simulate
+
+# video: every frame after a reader attaches, 64-byte header + raw BGRA;
+# probe <path>.ready, never the FIFO itself
+ffmpeg -f rawvideo -pixel_format bgr0 -video_size WxH -framerate N \
+  -i /tmp/tap/video.fifo -vf vflip -c:v libx264 -preset ultrafast out.mp4
+
+# input: one command per line, content coordinates, dispatched as real SDL
+# events (real hit-testing); each dispatch acks as [INPUT] on stdout
+echo "tap 150 250" > /tmp/tap/input.fifo
+echo "drag 100 100 100 400 500" > /tmp/tap/input.fifo
+```
+
+Full wire format and command grammar: `docs/offscreen-capture-design.md`.
+
 An HTML5 build merges anything mounted at `/html5-custom` into the web template, so
 you can ship your own `index.html`, icons and manifest.
 
@@ -73,9 +165,10 @@ you can ship your own `index.html`, icons and manifest.
 | | |
 |---|---|
 | `Solar2DBuilder` | HTML5 + Android packager |
-| `Solar2DSimulator` | headless, via Xvfb |
+| `Solar2DSimulator` | headless — offscreen EGL (llvmpipe), no X server |
 | [`solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | MCP server: run projects, screenshots, taps, logs |
 | Android SDK, Gradle, JDK 17 | pre-warmed so a build does not start by downloading Gradle |
+| `.github/actions/*` | composite actions wrapping build and capture for CI consumers |
 
 ## It is three repos, not one
 
@@ -103,7 +196,21 @@ upstream:
 
 A new Solar2D release needs a matching `linux-<tag>` branch on the fork before the
 image can build. That is deliberate — the build fails with a clear message rather
-than quietly producing an unpatched tree.
+than quietly producing an unpatched tree. The weekly publish run is therefore the
+signal that a release has landed. To cut the branch, start from the release tag and
+cherry-pick the previous `linux-<tag>` branch's commits onto it. Then check that the
+new branch changes the same files the same way as the old one did:
+
+```bash
+git switch -c linux-<new> <new>
+git cherry-pick -x <old>..linux-<old>
+diff <(git diff <old> linux-<old>) <(git diff <new> HEAD)   # empty
+```
+
+Upstream fixes to the HTML5 runtime reach the image only through `SOLAR2D_VERSION`,
+not through the fork branch: the WASM engine comes from that release's MSI (below).
+Before you count on such a fix, check that the release tag contains it:
+`git merge-base --is-ancestor <fix> <tag>`.
 
 ## Build args
 

@@ -1,0 +1,79 @@
+name: "Build HTML5"
+description: >-
+  Build a Solar2D project to WebAssembly with the solar2d Docker image.
+  Mounts the whole workspace at its own absolute path, so project and output
+  are plain workspace-relative paths.
+inputs:
+  project:
+    description: "Solar2D project directory, relative to the workspace root"
+    required: true
+  output:
+    description: "Build output directory, relative to the workspace root"
+    required: false
+    default: "build/html5"
+  app-name:
+    description: "Application name (also the output directory name)"
+    required: true
+  app-version:
+    description: "Application version"
+    required: false
+    default: "1.0.0"
+  html5-custom:
+    description: >-
+      Optional directory merged over the web template (index.html, icons,
+      manifest), relative to the workspace root
+    required: false
+    default: ""
+  build-version:
+    description: "Value injected into Lua as _G.BUILD_VERSION"
+    required: false
+    default: "${{ github.sha }}"
+  image:
+    description: "solar2d Docker image to run"
+    required: false
+    default: "ghcr.io/chkuendig/solar2d:latest"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PROJECT: ${{ inputs.project }}
+        OUTPUT: ${{ inputs.output }}
+        APP_NAME: ${{ inputs.app-name }}
+        APP_VERSION: ${{ inputs.app-version }}
+        HTML5_CUSTOM: ${{ inputs.html5-custom }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -d "$GITHUB_WORKSPACE/$PROJECT" ]; then
+          echo "::error::project directory '$PROJECT' not found under the workspace root"
+          exit 1
+        fi
+
+        MOUNTS=()
+        if [ -n "$HTML5_CUSTOM" ]; then
+          if [ ! -d "$GITHUB_WORKSPACE/$HTML5_CUSTOM" ]; then
+            echo "::error::html5-custom directory '$HTML5_CUSTOM' not found under the workspace root"
+            exit 1
+          fi
+          MOUNTS+=(-v "$GITHUB_WORKSPACE/$HTML5_CUSTOM:/html5-custom")
+        fi
+
+        # The workspace is mounted at its own absolute path so the project,
+        # output and custom-template directories keep their runner paths and
+        # need no per-path volume juggling. Env vars are passed through
+        # name-only (-e NAME) so caller-provided secrets never appear on a
+        # command line in the logs.
+        docker run --rm \
+          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+          "${MOUNTS[@]}" \
+          -e BUILD_VERSION \
+          -e SENTRY_RELEASE \
+          "$IMAGE" \
+          build \
+          --project-path "$GITHUB_WORKSPACE/$PROJECT" \
+          --output-path "$GITHUB_WORKSPACE/$OUTPUT" \
+          --app-name "$APP_NAME" \
+          --app-version "$APP_VERSION"

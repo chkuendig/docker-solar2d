@@ -17,6 +17,12 @@ on:
       solar2d_version:
         description: "Solar2D version (e.g. 2026.3731). Leave empty to auto-detect latest."
         required: false
+      image_tag:
+        description: "Optional candidate tag. When set, do not move latest or the release tag."
+        required: false
+      solar2d_ref:
+        description: "Branch of the Solar2D fork to build. Defaults to linux-<tag>. Use with image_tag to try a fix before it reaches an integration branch."
+        required: false
 
 env:
   REGISTRY: ghcr.io
@@ -33,6 +39,7 @@ jobs:
       solar2d_version: ${{ steps.decide.outputs.solar2d_version }}
       solar2d_tag: ${{ steps.decide.outputs.solar2d_tag }}
       solar2d_ref_sha: ${{ steps.forkref.outputs.sha }}
+      solar2d_ref: ${{ steps.forkref.outputs.branch }}
 
     steps:
       - name: Resolve Solar2D version
@@ -70,12 +77,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="linux-${{ steps.resolve.outputs.tag }}"
+          BRANCH="${{ inputs.solar2d_ref }}"
+          [[ -n "$BRANCH" ]] || BRANCH="linux-${{ steps.resolve.outputs.tag }}"
           if ! SHA=$(gh api "repos/chkuendig/corona/commits/$BRANCH" --jq .sha 2>/dev/null); then
-            echo "::error::chkuendig/corona has no branch $BRANCH — push one cut from tag ${{ steps.resolve.outputs.tag }} before building"
+            echo "::error::chkuendig/corona has no branch $BRANCH — push it before building"
             exit 1
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "Solar2D source: $BRANCH @ $SHA"
 
       - name: Check if image already exists
@@ -101,11 +110,15 @@ jobs:
           TAG="${{ steps.resolve.outputs.tag }}"
           EXISTS="${{ steps.exists.outputs.exists }}"
           EVENT="${{ github.event_name }}"
+          CANDIDATE_TAG="${{ inputs.image_tag }}"
 
           echo "solar2d_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "solar2d_tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          if [[ "$EVENT" == "push" ]]; then
+          if [[ -n "$CANDIDATE_TAG" ]]; then
+            echo "Manual candidate tag $CANDIDATE_TAG — always build"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT" == "push" ]]; then
             echo "Push event (image sources changed) — always build"
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           elif [[ "$EXISTS" == "true" ]]; then
@@ -141,8 +154,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=raw,value=${{ needs.check.outputs.solar2d_tag }}
+            type=raw,value=latest,enable=${{ inputs.image_tag == '' }}
+            type=raw,value=${{ needs.check.outputs.solar2d_tag }},enable=${{ inputs.image_tag == '' }}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ inputs.image_tag != '' }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -153,6 +167,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             SOLAR2D_VERSION=${{ needs.check.outputs.solar2d_version }}
+            SOLAR2D_REF=${{ needs.check.outputs.solar2d_ref }}
             SOLAR2D_REF_SHA=${{ needs.check.outputs.solar2d_ref_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

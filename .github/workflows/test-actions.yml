@@ -1,0 +1,113 @@
+name: Test Actions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/**"
+      - ".github/workflows/test-actions.yml"
+      - "capture.sh"
+  pull_request:
+    paths:
+      - ".github/actions/**"
+      - ".github/workflows/test-actions.yml"
+      - "capture.sh"
+  workflow_dispatch:
+
+jobs:
+  html5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample project
+        run: |
+          mkdir -p sample
+          echo "settings = {}" > sample/build.settings
+          cat > sample/config.lua <<'EOF'
+          application =
+          {
+              content = { width = 320, height = 480, scale = "letterbox" },
+          }
+          EOF
+          cat > sample/main.lua <<'EOF'
+          display.newText("hello", display.contentCenterX, display.contentCenterY)
+          EOF
+
+      - uses: ./.github/actions/build-html5
+        with:
+          project: sample
+          output: out/html5
+          app-name: Sample
+
+      - name: Check output
+        run: test -f out/html5/Sample.html5/index.html
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample project
+        run: |
+          mkdir -p sample
+          # CoronaBuilder's Android packager stops before it starts without a
+          # build.settings, even an empty one.
+          echo "settings = {}" > sample/build.settings
+          cat > sample/config.lua <<'EOF'
+          application =
+          {
+              content = { width = 320, height = 480, scale = "letterbox" },
+          }
+          EOF
+          cat > sample/main.lua <<'EOF'
+          display.newText("hello", display.contentCenterX, display.contentCenterY)
+          EOF
+
+      - uses: ./.github/actions/build-android
+        with:
+          project: sample
+          output: out/android
+          app-name: Sample
+          package: com.example.sample
+          version-code: ${{ github.run_number }}
+
+      - name: Check output
+        run: |
+          test -f out/android/Sample.apk
+          test -f out/android/Sample.aab
+
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample project
+        run: |
+          mkdir -p sample
+          echo "settings = {}" > sample/build.settings
+          cat > sample/config.lua <<'EOF'
+          application =
+          {
+              content = { width = 320, height = 480, scale = "letterbox" },
+          }
+          EOF
+          cat > sample/main.lua <<'EOF'
+          local bg = display.newRect(display.contentCenterX, display.contentCenterY, 600, 900)
+          bg:setFillColor(1, 0, 0)
+          timer.performWithDelay(2000, function() bg:setFillColor(0, 0, 1) end)
+          EOF
+
+      # capture needs the offscreen surface sizing from the fork's frame-tap
+      # branches; pin the candidate until a release image carries them.
+      - uses: ./.github/actions/capture
+        with:
+          project: sample
+          output: out/captures
+          label: home-320x480
+          screen: 320x480
+          delay-ms: 4000
+          image: ghcr.io/chkuendig/solar2d:frame-tap-candidate
+
+      - name: Check output
+        run: test -f out/captures/home-320x480.png
