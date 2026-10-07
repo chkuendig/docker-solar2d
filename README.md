@@ -43,6 +43,10 @@ The default `bind` transport mounts the workspace directly. Android's optional
 `gradle-cache` input names a workspace-relative directory that can be restored
 with `actions/cache`; streamed builds copy downloads back even on build failure:
 
+Streamed containers auto-remove on exit and carry their run ID. Their lifetime is
+bounded to 1800 seconds by default; set `SOLAR2D_ACTION_KEEPALIVE_SECONDS` in the
+calling step's `env` to match longer job budgets (integer 1–86400 seconds).
+
 
 ```yaml
 jobs:

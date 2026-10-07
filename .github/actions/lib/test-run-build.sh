@@ -33,6 +33,7 @@ export PATH="$WORK/bin:$PATH" CALLS="$WORK/calls" UPLOADS="$WORK/uploads"
 export OUTPUT_FIXTURE="$WORK/output" CACHE_FIXTURE="$WORK/cache"
 export GITHUB_WORKSPACE="$WORK/workspace with spaces" PROJECT=project OUTPUT=out
 export IMAGE=fixture TRANSPORT=stream GRADLE_CACHE=gradle
+export GITHUB_RUN_ID=123
 export ANDROID_KEYSTORE_PASSWORD=secret-that-must-not-be-in-arguments
 bash "$ROOT/run-build.sh" build --app-name Fixture
 [ "$(cat "$GITHUB_WORKSPACE/out/index.html")" = built ]
@@ -41,6 +42,10 @@ grep -q 'project/main.lua' "$UPLOADS"
 grep -q 'rm -fv' "$CALLS"
 ! grep -q 'secret-that-must-not-be-in-arguments' "$CALLS"
 ! grep -q -- '-v ' "$CALLS"
+grep -q '^create --rm' "$CALLS"
+grep -q 'com.solar2d.action.run-id=123' "$CALLS"
+grep -q 'com.solar2d.action.keepalive-seconds=1800' "$CALLS"
+grep -Fq 'exec\ sleep\ 1800' "$CALLS"
 
 : > "$CALLS"
 set +e
@@ -51,6 +56,18 @@ set -e
 grep -q 'rm -fv' "$CALLS"
 [ "$(cat "$GITHUB_WORKSPACE/gradle/dependency")" = downloaded ]
 
+: > "$CALLS"
+SOLAR2D_ACTION_KEEPALIVE_SECONDS=2700 bash "$ROOT/run-build.sh" build
+grep -q 'com.solar2d.action.keepalive-seconds=2700' "$CALLS"
+grep -Fq 'exec\ sleep\ 2700' "$CALLS"
+for invalid in 0 -1 86401 99999999999999999999 '30; touch /tmp/unsafe' nope; do
+    : > "$CALLS"
+    if SOLAR2D_ACTION_KEEPALIVE_SECONDS="$invalid" bash "$ROOT/run-build.sh" build; then
+        echo "invalid keepalive accepted: $invalid" >&2
+        exit 1
+    fi
+    [ ! -s "$CALLS" ]
+done
 : > "$CALLS"
 TRANSPORT=bind bash "$ROOT/run-build.sh" build
 # Bind mode retains the simple one-container invocation.

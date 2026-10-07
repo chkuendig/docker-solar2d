@@ -28,6 +28,11 @@ fi
 
 # A bounded holder lets docker exec receive stdin for tar without confusing it
 # with the builder's own input. A killed runner cannot leave it running forever.
+KEEPALIVE_SECONDS=${SOLAR2D_ACTION_KEEPALIVE_SECONDS:-1800}
+if ! [[ $KEEPALIVE_SECONDS =~ ^[1-9][0-9]{0,4}$ ]] || [ "$KEEPALIVE_SECONDS" -gt 86400 ]; then
+    echo "::error::SOLAR2D_ACTION_KEEPALIVE_SECONDS must be an integer from 1 to 86400" >&2
+    exit 2
+fi
 name="solar2d-action-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$-${RANDOM}"
 created=false
 cleanup() {
@@ -50,10 +55,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-docker create --name "$name" --label com.solar2d.action.ephemeral=true \
+docker create --rm --name "$name" --label com.solar2d.action.ephemeral=true \
+    --label "com.solar2d.action.run-id=${GITHUB_RUN_ID:-local}" \
+    --label "com.solar2d.action.keepalive-seconds=$KEEPALIVE_SECONDS" \
     --user "$(id -u):$(id -g)" "${envs[@]}" \
     --tmpfs /artifacts:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
-    --entrypoint /bin/sh "$IMAGE" -c 'exec sleep 1800' >/dev/null
+    --entrypoint /bin/sh "$IMAGE" -c "exec sleep $KEEPALIVE_SECONDS" >/dev/null
 created=true
 docker start "$name" >/dev/null
 # Workspace ancestors may be owned by root in the image. Prepare them once as
