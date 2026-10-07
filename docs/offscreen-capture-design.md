@@ -6,6 +6,8 @@ shipped on the fork's `linux-3734` release branch (it was developed on
 solar2d-mcp `video-tap`, but solar2d-mcp was retired on 2026-10-07 and the image
 no longer ships it: the MCP sections below are a historical record, while the
 engine channels (`SOLAR2D_VIDEO_PIPE`, `SOLAR2D_INPUT_PIPE`) are current.
+The walk recorder now uses `walk-video.py` to read the framed video channel,
+validate headers and strip them before feeding pixel payloads to ffmpeg.
 Scope: one engine patch (corona fork), one server change (solar2d-mcp), one
 image change (docker-solar2d), and the consumer-side capture flow. Written to
 be upstreamable to `coronalabs/corona` and isolated to `platform/linux`.

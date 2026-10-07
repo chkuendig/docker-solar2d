@@ -36,7 +36,17 @@ docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
 ### From GitHub Actions
 
 Both build steps ship as composite actions, so a workflow does not hand-write
-`docker run` and its volume mounts:
+`docker run` and its volume mounts. Set `transport: stream` when the Docker
+daemon cannot see the runner's checkout paths: inputs and outputs travel through
+client-side tar streams, and the temporary container is removed after the build.
+The default `bind` transport mounts the workspace directly. Android's optional
+`gradle-cache` input names a workspace-relative directory that can be restored
+with `actions/cache`; streamed builds copy downloads back even on build failure:
+
+Streamed containers auto-remove on exit and carry their run ID. Their lifetime is
+bounded to 1800 seconds by default; set `SOLAR2D_ACTION_KEEPALIVE_SECONDS` in the
+calling step's `env` to match longer job budgets (integer 1–86400 seconds).
+
 
 ```yaml
 jobs:
@@ -92,6 +102,11 @@ marker the app prints:
             MYAPP_DEBUG_PREVIEW=home
             MYAPP_PREVIEW_LANG=de
 ```
+
+With video enabled, the simulator's framed BGRA stream passes through a Python
+reader that validates each 64-byte header and forwards complete pixel payloads
+to ffmpeg. Each `snap` holds the scene for one second before the next step,
+so its state appears in the video, including the last snapshot.
 
 ```text
 # ci/home.walk — one step per line

@@ -159,19 +159,11 @@ if [ "$WANT_VIDEO" = "1" ]; then
     mkfifo "$VIDEO_FIFO"
     export SOLAR2D_VIDEO_PIPE="$VIDEO_FIFO"
     export SOLAR2D_VIDEO_FPS=15
-    # The offscreen surface is the content box plus the simulator's 19px menu
-    # bar on top; frames arrive bottom-up (GL readback). Flip, crop the menu
-    # away so the video is exactly the content box, pad to even dimensions
-    # (yuv420p needs them; content boxes are often odd). Fragmented MP4 so a
-    # killed walk still leaves everything so far playable.
+    # Frames carry a 64-byte S2VT header; decode it and pass only complete
+    # pixel payloads to ffmpeg. The header supplies the actual surface size.
     rm -f "$OUT/walk.mp4"
-    ffmpeg -y -loglevel error \
-        -f rawvideo -pixel_format bgr0 -video_size "${DEVW}x$((DEVH + 19))" -framerate 15 \
-        -use_wallclock_as_timestamps 1 -i "$VIDEO_FIFO" \
-        -vf "vflip,crop=${DEVW}:${DEVH}:0:19,pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p" -fps_mode cfr -r 15 \
-        -c:v libx264 -preset ultrafast -crf 20 \
-        -movflags +frag_keyframe+empty_moov+default_base_moof -frag_duration 1000000 -flush_packets 1 \
-        "$OUT/walk.mp4" > "$WORK/ffmpeg.log" 2>&1 &
+    python3 /usr/local/bin/walk-video.py "$VIDEO_FIFO" "$OUT/walk.mp4" "$DEVW" "$DEVH" \
+        > "$WORK/ffmpeg.log" 2>&1 &
     FFMPEG_PID=$!
     # Hold a write end open so ffmpeg never sees EOF between the engine's
     # reconnects; the engine's own writer is the one that carries frames.
@@ -202,6 +194,10 @@ check_health() {
     # different question than the one asked), and no fail-marker may have
     # appeared anywhere in the log.
     kill -0 "$SIM_PID" 2>/dev/null || die_with_log "simulator exited during: $1"
+    if [ -n "$FFMPEG_PID" ] && ! kill -0 "$FFMPEG_PID" 2>/dev/null; then
+        tail -5 "$WORK/ffmpeg.log" >&2
+        die_with_log "video recorder exited during: $1"
+    fi
     if grep -aq 'ERROR: Syntax error' "$LOG"; then
         grep -aA2 'ERROR: Syntax error' "$LOG" >&2
         die_with_log "the simulator reported a Lua syntax error"
@@ -288,6 +284,12 @@ while IFS= read -r line || [ -n "$line" ]; do
             rm -f "$OUT/$LABEL.png"
             cp "$SANDBOX/project/Documents/$(printf '_walk-%04d.png' "$NEXT_SNAP")" "$OUT/$LABEL.png"
             echo "walk: snapped $LABEL.png"
+            # A PNG acknowledgement precedes the next rendered video frame.
+            # Keep each named state on screen long enough to reach the tap
+            # and to be visible during playback, including the final snap.
+            if [ "$WANT_VIDEO" = "1" ]; then
+                wait_ms 1000 "video hold for $LABEL"
+            fi
             ;;
         tap\ *|wtap\ *|drag\ *|key\ *|text\ *)
             echo "$line" >&9
@@ -315,7 +317,10 @@ exec 9>&-
 
 if [ -n "$FFMPEG_PID" ]; then
     exec 8>&-
-    wait "$FFMPEG_PID" 2>/dev/null || true
+    if ! wait "$FFMPEG_PID"; then
+        tail -5 "$WORK/ffmpeg.log" >&2
+        die_with_log "video recording failed"
+    fi
     FFMPEG_PID=""
     [ -s "$OUT/walk.mp4" ] || {
         tail -5 "$WORK/ffmpeg.log" >&2

@@ -17,8 +17,18 @@ on:
   workflow_dispatch:
 
 jobs:
+  transport:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash .github/actions/lib/test-run-build.sh
+      - run: python3 .github/actions/walk/test_walk_video.py
+
   html5:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        transport: [bind, stream]
     steps:
       - uses: actions/checkout@v6
 
@@ -41,6 +51,7 @@ jobs:
           project: sample
           output: out/html5
           app-name: Sample
+          transport: ${{ matrix.transport }}
 
       - name: Check output
         run: |
@@ -78,6 +89,8 @@ jobs:
           app-name: Sample
           package: com.example.sample
           version-code: ${{ github.run_number }}
+          transport: stream
+          gradle-cache: .gradle-cache
 
       - name: Check output
         run: |
@@ -105,6 +118,10 @@ jobs:
           cat > sample/main.lua <<'EOF'
           local bg = display.newRect(display.contentCenterX, display.contentCenterY, 600, 900)
           bg:setFillColor(1, 0, 0)
+          -- A fixed marker catches drifting rows in the video stream, which
+          -- uniform colour frames cannot reveal.
+          local marker = display.newRect(40, 40, 40, 40)
+          marker:setFillColor(1, 1, 1)
           local taps = 0
           Runtime:addEventListener("touch", function(e)
               if e.phase == "ended" then
@@ -160,3 +177,32 @@ jobs:
           [ "$(px green)" = "0 255 0" ]
           # Outputs belong to the runner's uid, never root.
           [ "$(stat -c %u out/walk/red.png)" = "$(id -u)" ]
+
+          # The marker stays white in every decoded frame; ignoring the
+          # per-frame protocol header makes it drift across the image.
+          docker run --rm -v "$PWD/out/walk:/w:ro" --entrypoint ffmpeg ghcr.io/chkuendig/solar2d:3734 -v error -ss 1 -i /w/walk.mp4 -vf 'format=rgb24,crop=1:1:40:40' -f rawvideo -pix_fmt rgb24 - > /tmp/walk-marker.rgb
+          node <<'JS'
+          const fs = require('node:fs');
+          const data = fs.readFileSync('/tmp/walk-marker.rgb');
+          if (data.length < 30 * 3 || data.length % 3) throw new Error('too few complete marker samples');
+          if (data.some(channel => channel < 240)) throw new Error('video marker drifted or was corrupted');
+          JS
+          # Every named state must reach the video in order, including the
+          # final state that used to race simulator shutdown.
+          docker run --rm -v "$PWD/out/walk:/w:ro" --entrypoint ffmpeg ghcr.io/chkuendig/solar2d:3734 -v error -i /w/walk.mp4 -vf 'format=rgb24,crop=1:1:160:240' -f rawvideo -pix_fmt rgb24 - > /tmp/walk-centre.rgb
+          node <<'JS'
+          const fs = require('node:fs');
+          const data = fs.readFileSync('/tmp/walk-centre.rgb');
+          if (data.length % 3) throw new Error('incomplete centre samples');
+          const states = [];
+          for (let i = 0; i < data.length; i += 3) {
+            const [r, g, b] = data.subarray(i, i + 3);
+            const state = r > 230 && g < 20 && b < 20 ? 'red'
+              : b > 230 && r < 20 && g < 20 ? 'blue'
+              : g > 230 && r < 20 && b < 20 ? 'green' : null;
+            if (state && states.at(-1) !== state) states.push(state);
+          }
+          if (states.join(',') !== 'red,blue,green') throw new Error('video omitted or reordered a named state: ' + states);
+          const last = [...data.subarray(-3)];
+          if (!(last[0] < 20 && last[1] > 230 && last[2] < 20)) throw new Error('final green state missing from video');
+          JS
