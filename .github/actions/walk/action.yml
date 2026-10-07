@@ -116,6 +116,7 @@ runs:
           --user "$(id -u):$(id -g)" \
           -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
           -v "$ACTION_PATH/walk.sh:/usr/local/bin/walk.sh:ro" \
+          -v "$ACTION_PATH/walk-video.py:/usr/local/bin/walk-video.py:ro" \
           --entrypoint /usr/local/bin/walk.sh \
           --env-file "$ENV_FILE" \
           -e HOME=/tmp \

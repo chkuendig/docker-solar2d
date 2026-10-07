@@ -103,6 +103,11 @@ marker the app prints:
             MYAPP_PREVIEW_LANG=de
 ```
 
+With video enabled, the simulator's framed BGRA stream passes through a Python
+reader that validates each 64-byte header and forwards complete pixel payloads
+to ffmpeg. Each `snap` holds the scene for one second before the next step,
+so its state appears in the video, including the last snapshot.
+
 ```text
 # ci/home.walk — one step per line
 fail MYAPP_DEFECT                 # abort the moment the app prints this
