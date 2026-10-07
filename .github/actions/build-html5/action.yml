@@ -28,6 +28,10 @@ inputs:
     description: "Value injected into Lua as _G.BUILD_VERSION"
     required: false
     default: "${{ github.sha }}"
+  transport:
+    description: "Workspace transport: bind for a local daemon, stream for a containerized runner or remote daemon"
+    required: false
+    default: "bind"
   image:
     description: "solar2d Docker image to run"
     required: false
@@ -38,6 +42,8 @@ runs:
     - shell: bash
       env:
         IMAGE: ${{ inputs.image }}
+        ACTION_PATH: ${{ github.action_path }}
+        TRANSPORT: ${{ inputs.transport }}
         PROJECT: ${{ inputs.project }}
         OUTPUT: ${{ inputs.output }}
         APP_NAME: ${{ inputs.app-name }}
@@ -52,28 +58,14 @@ runs:
           exit 1
         fi
 
-        MOUNTS=()
         if [ -n "$HTML5_CUSTOM" ]; then
           if [ ! -d "$GITHUB_WORKSPACE/$HTML5_CUSTOM" ]; then
             echo "::error::html5-custom directory '$HTML5_CUSTOM' not found under the workspace root"
             exit 1
           fi
-          MOUNTS+=(-v "$GITHUB_WORKSPACE/$HTML5_CUSTOM:/html5-custom")
         fi
 
-        # The workspace is mounted at its own absolute path so the project,
-        # output and custom-template directories keep their runner paths and
-        # need no per-path volume juggling. Env vars are passed through
-        # name-only (-e NAME) so caller-provided secrets never appear on a
-        # command line in the logs.
-        docker run --rm \
-          --user "$(id -u):$(id -g)" \
-          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
-          -e HOME=/tmp \
-          "${MOUNTS[@]}" \
-          -e BUILD_VERSION \
-          -e SENTRY_RELEASE \
-          "$IMAGE" \
+        bash "$ACTION_PATH/../lib/run-build.sh" \
           build \
           --project-path "$GITHUB_WORKSPACE/$PROJECT" \
           --output-path "$GITHUB_WORKSPACE/$OUTPUT" \

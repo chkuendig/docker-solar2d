@@ -17,8 +17,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  transport:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash .github/actions/lib/test-run-build.sh
+
   html5:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        transport: [bind, stream]
     steps:
       - uses: actions/checkout@v6
 
@@ -41,6 +50,7 @@ jobs:
           project: sample
           output: out/html5
           app-name: Sample
+          transport: ${{ matrix.transport }}
 
       - name: Check output
         run: |
@@ -78,6 +88,8 @@ jobs:
           app-name: Sample
           package: com.example.sample
           version-code: ${{ github.run_number }}
+          transport: stream
+          gradle-cache: .gradle-cache
 
       - name: Check output
         run: |

@@ -36,7 +36,13 @@ docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
 ### From GitHub Actions
 
 Both build steps ship as composite actions, so a workflow does not hand-write
-`docker run` and its volume mounts:
+`docker run` and its volume mounts. Set `transport: stream` when the Docker
+daemon cannot see the runner's checkout paths: inputs and outputs travel through
+client-side tar streams, and the temporary container is removed after the build.
+The default `bind` transport mounts the workspace directly. Android's optional
+`gradle-cache` input names a workspace-relative directory that can be restored
+with `actions/cache`; streamed builds copy downloads back even on build failure:
+
 
 ```yaml
 jobs:

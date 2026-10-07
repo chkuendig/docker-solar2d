@@ -42,6 +42,14 @@ inputs:
     description: "Value injected into Lua as _G.BUILD_VERSION"
     required: false
     default: "${{ github.sha }}"
+  transport:
+    description: "Workspace transport: bind for a local daemon, stream for a containerized runner or remote daemon"
+    required: false
+    default: "bind"
+  gradle-cache:
+    description: "Optional Gradle cache directory, relative to the workspace root; restored after streamed builds too"
+    required: false
+    default: ""
   image:
     description: "solar2d Docker image to run"
     required: false
@@ -52,6 +60,9 @@ runs:
     - shell: bash
       env:
         IMAGE: ${{ inputs.image }}
+        ACTION_PATH: ${{ github.action_path }}
+        TRANSPORT: ${{ inputs.transport }}
+        GRADLE_CACHE: ${{ inputs.gradle-cache }}
         PROJECT: ${{ inputs.project }}
         OUTPUT: ${{ inputs.output }}
         APP_NAME: ${{ inputs.app-name }}
@@ -78,23 +89,7 @@ runs:
           ARGS+=(--keystore "$GITHUB_WORKSPACE/$KEYSTORE")
         fi
 
-        # The workspace is mounted at its own absolute path so the project,
-        # output and keystore paths keep their runner paths. The container runs
-        # as the runner's uid, which has no home in the image: HOME points at
-        # writable scratch so Gradle and the Android tools (~/.android, the
-        # debug keystore) have somewhere to write. Signing secrets
-        # are forwarded name-only (-e NAME) from the caller's environment:
-        # they never appear on a command line in the logs.
-        docker run --rm \
-          --user "$(id -u):$(id -g)" \
-          -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
-          -e HOME=/tmp \
-          -e BUILD_VERSION \
-          -e ANDROID_KEYSTORE_BASE64 \
-          -e ANDROID_KEYSTORE_PASSWORD \
-          -e ANDROID_KEYSTORE_ALIAS \
-          -e ANDROID_KEYSTORE_ALIAS_PASSWORD \
-          "$IMAGE" \
+        bash "$ACTION_PATH/../lib/run-build.sh" \
           build-android \
           --project-path "$GITHUB_WORKSPACE/$PROJECT" \
           --output-path "$GITHUB_WORKSPACE/$OUTPUT" \
