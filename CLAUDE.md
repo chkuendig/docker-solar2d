@@ -1,7 +1,7 @@
 # docker-solar2d
 
 A Linux Docker image for Solar2D: HTML5 and Android builds, a headless
-simulator, and an MCP server over stdio.
+simulator, and the walk/capture screenshot tooling built on it.
 
 ## No downstream-consumer references
 
