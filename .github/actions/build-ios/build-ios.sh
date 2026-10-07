@@ -32,7 +32,10 @@ install)
         fail "IOS_CERTIFICATE_BASE64 and IOS_PROVISIONING_PROFILE_BASE64 must be set in the step's env (there is no unsigned iOS build); set preflight: true to test the toolchain without them"
     fi
     command -v xcodebuild >/dev/null || fail "Xcode is not available on this runner"
-    echo "Xcode: $(xcode-select -p) ($(xcodebuild -version | head -1))"
+    # Read the whole version output before taking its first line: closing
+    # the pipe early makes xcodebuild log a broken-pipe exception.
+    XCODE_VERSION=$(xcodebuild -version 2>/dev/null || true)
+    echo "Xcode: $(xcode-select -p) (${XCODE_VERSION%%$'\n'*})"
 
     # Solar2D ships no CLI installer. The DMG holds one "Corona-<build>" folder
     # that must be copied whole: CoronaBuilder lives at
