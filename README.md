@@ -74,8 +74,8 @@ jobs:
 ```
 
 Inputs map one-to-one onto the build scripts' flags (`project`, `output`,
-`app-name`, `app-version`, `html5-custom`, and on Android `package`,
-`version-code`, `store`, `keystore`). The workspace is mounted into the
+`app-name`, `app-version`, `html5-custom`, `build-version`, and on Android
+`package`, `version-code`, `store`, `keystore`). The workspace is mounted into the
 container at its own absolute path, so those inputs are plain
 workspace-relative paths. Signing credentials travel through `env`, never
 `with` — GitHub can mask secrets in logs but not in input values rendered into
@@ -123,7 +123,8 @@ snap scrolled
 ```
 
 A single screenshot is a two-line walk (`wait <ms>`, `snap <label>`); the
-image's `capture` command is exactly that. How the app reaches each screen
+image's `capture` command is exactly that. `expect` steps give up after
+`expect-timeout-ms` (default 30000) and fail the walk. How the app reaches each screen
 stays the project's business: the walk pins geometry and sequencing, your
 preview hook picks the scene through whatever env vars it already reads, and
 your stdout markers are what `expect` and `fail` wait on. Needs release 3734
