@@ -6,7 +6,10 @@ description: >-
   prints, and each `snap` saves a named PNG — optionally with an MP4 of the
   whole walk. Needs release 3734 or newer; pin the image input to a release
   or digest. How the app reaches each screen stays the project's business:
-  its own env vars reach it unchanged through `env`.
+  its own env vars reach it unchanged through `env`. Note: snapshots come
+  from display.save, which renders the Solar2D scene only; native objects
+  (native.newTextField, newTextBox, webviews) are absent from the PNGs but
+  present in the video, which is read from the rendered frame.
 inputs:
   project:
     description: "Solar2D project directory, relative to the workspace root"
@@ -30,7 +33,8 @@ inputs:
   video:
     description: >-
       Record the whole walk as walk.mp4 alongside the snapshots (content box
-      only, 15 fps, fragmented so a killed run still plays)
+      only, 15 fps, fragmented so a killed run still plays). Unlike the
+      snapshots, the video shows native objects such as text fields.
     required: false
     default: "false"
   expect-timeout-ms:

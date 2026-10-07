@@ -128,6 +128,9 @@ stays the project's business: the walk pins geometry and sequencing, your
 preview hook picks the scene through whatever env vars it already reads, and
 your stdout markers are what `expect` and `fail` wait on. Needs release 3734
 or newer.
+Snapshots come from `display.save`, so native objects (text fields, text
+boxes, webviews) are missing from the PNGs; the video is read from the rendered
+frame and shows them.
 
 ### Warm runtime
 
