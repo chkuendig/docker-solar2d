@@ -85,6 +85,40 @@ The action ref selects its code; the `image` input selects the Solar2D release
 it runs. For reproducible CI, pin an action commit and an image release or
 digest, such as `ghcr.io/chkuendig/solar2d:3734`.
 
+An iOS build cannot come out of the Linux image: it needs Xcode. The
+`build-ios` action runs on a macOS runner, installs the official Solar2D macOS
+release named by `solar2d-version`, and drives its CoronaBuilder with the same
+inputs as the other build actions. Signing is mandatory (the Apple packager
+rejects a build without a provisioning profile, Simulator targets included), so
+the certificate and profile travel through `env` like the Android keystore:
+
+```yaml
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: chkuendig/docker-solar2d/.github/actions/build-ios@main
+        with:
+          project: corona
+          app-name: MyApp
+          app-version: 1.4.2
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+```
+
+`IOS_CERTIFICATE_BASE64` is a base64 PKCS#12 holding the Apple Distribution (or
+Development) certificate and its key; `IOS_PROVISIONING_PROFILE_BASE64` is the
+base64 `.mobileprovision` for the app id, which is also where the builder reads
+the bundle id. If OpenSSL 3 makes the p12, export it with `-legacy`: macOS cannot
+import its default AES/SHA-256 form and reports a wrong password instead. The
+action imports into a throwaway keychain that is deleted when the job ends,
+fails if the profile has expired, and packages a bare `.app` into an IPA when the
+profile type makes the builder stop short of one. `preflight: true` installs the
+toolchain and validates inputs without secrets or a build; macOS minutes cost
+ten times Linux ones, so keep iOS off pull-request triggers.
+
 A `walk` action drives the headless simulator through a steps file and
 saves a named PNG per `snap` — offscreen, content box pinned, every input
 dispatched as a real SDL event and every step waiting for its ack or for a

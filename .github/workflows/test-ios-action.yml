@@ -1,0 +1,69 @@
+# macOS minutes bill at ten times the Linux rate, so the iOS action has its
+# own workflow with a narrow path filter instead of a job in test-actions.yml.
+# Without signing secrets in this repository the test runs the action in
+# preflight: toolchain download and install, builder discovery, input
+# validation and params generation — everything but the signed build.
+name: Test iOS Action
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/build-ios/**"
+      - ".github/workflows/test-ios-action.yml"
+  pull_request:
+    paths:
+      - ".github/actions/build-ios/**"
+      - ".github/workflows/test-ios-action.yml"
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample project
+        run: |
+          mkdir -p sample
+          echo "settings = {}" > sample/build.settings
+          cat > sample/config.lua <<'EOF'
+          application =
+          {
+              content = { width = 320, height = 480, scale = "letterbox" },
+          }
+          EOF
+          cat > sample/main.lua <<'EOF'
+          display.newText("hello", display.contentCenterX, display.contentCenterY)
+          EOF
+          echo '_G.BUILD_VERSION = "keep-me"' > sample/version.lua
+
+      - uses: ./.github/actions/build-ios
+        id: ios
+        with:
+          project: sample
+          output: out/ios
+          app-name: Sample
+          preflight: "true"
+
+      - name: Check
+        run: |
+          test -z "${{ steps.ios.outputs.ipa }}"
+          test -x "$CORONA_BUILDER"
+          # The project's own version.lua came back untouched.
+          [ "$(cat sample/version.lua)" = '_G.BUILD_VERSION = "keep-me"' ]
+          # The keychain and profile never existed in preflight; the params file is gone.
+          test ! -f "$RUNNER_TEMP/ios_params.lua"
+
+      # Without secrets and without preflight the action must refuse clearly,
+      # not produce something unsigned.
+      - uses: ./.github/actions/build-ios
+        id: unsigned
+        continue-on-error: true
+        with:
+          project: sample
+          app-name: Sample
+
+      - name: The unsigned attempt failed as designed
+        run: test "${{ steps.unsigned.outcome }}" = failure

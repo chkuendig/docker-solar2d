@@ -1,0 +1,101 @@
+name: "Build iOS"
+description: >-
+  Build a Solar2D project to a signed IPA on a macOS runner with the official
+  Solar2D macOS release's CoronaBuilder. The Docker image plays no part: iOS
+  needs Xcode. Signing material comes from the caller's environment
+  (IOS_CERTIFICATE_BASE64, IOS_CERTIFICATE_PASSWORD,
+  IOS_PROVISIONING_PROFILE_BASE64); there is no unsigned iOS build, so without
+  them the action fails unless preflight is set.
+inputs:
+  project:
+    description: "Solar2D project directory, relative to the workspace root"
+    required: true
+  output:
+    description: "Build output directory, relative to the workspace root"
+    required: false
+    default: "build/ios"
+  app-name:
+    description: "Application name (also the IPA file name)"
+    required: true
+  app-version:
+    description: "CFBundleShortVersionString; at most three numeric components"
+    required: false
+    default: "1.0.0"
+  build-version:
+    description: "Value injected into Lua as _G.BUILD_VERSION"
+    required: false
+    default: "${{ github.sha }}"
+  target-device:
+    description: "Leave empty for the builder's default (universal), or iphone / ipad"
+    required: false
+    default: ""
+  solar2d-version:
+    description: >-
+      Official Solar2D macOS release to build with, as YYYY.NNNN. Independent
+      of the Linux image releases; match it to the engine the other platforms
+      use.
+    required: false
+    default: "2026.3734"
+  preflight:
+    description: >-
+      Install the toolchain and validate inputs without signing or building.
+      For self-tests and for checking a new solar2d-version resolves; no
+      secrets needed.
+    required: false
+    default: "false"
+outputs:
+  ipa:
+    description: "Workspace-relative path of the IPA (empty in preflight)"
+    value: ${{ steps.build.outputs.ipa }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/solar2d-${{ inputs.solar2d-version }}.dmg
+        key: solar2d-macos-${{ inputs.solar2d-version }}
+
+    - name: Install Solar2D
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        SOLAR2D_VERSION: ${{ inputs.solar2d-version }}
+        PROJECT: ${{ inputs.project }}
+        APP_NAME: ${{ inputs.app-name }}
+        APP_VERSION: ${{ inputs.app-version }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+        TARGET_DEVICE: ${{ inputs.target-device }}
+        PREFLIGHT: ${{ inputs.preflight }}
+      run: bash "$ACTION_PATH/build-ios.sh" install
+
+    # Secrets are read from the caller's env, never from inputs, so they
+    # cannot be rendered into workflow UIs.
+    - name: Import signing certificate and provisioning profile
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PREFLIGHT: ${{ inputs.preflight }}
+      run: bash "$ACTION_PATH/build-ios.sh" sign
+
+    - name: Build
+      id: build
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PROJECT: ${{ inputs.project }}
+        OUTPUT: ${{ inputs.output }}
+        APP_NAME: ${{ inputs.app-name }}
+        APP_VERSION: ${{ inputs.app-version }}
+        BUILD_VERSION: ${{ inputs.build-version }}
+        TARGET_DEVICE: ${{ inputs.target-device }}
+        PREFLIGHT: ${{ inputs.preflight }}
+      run: bash "$ACTION_PATH/build-ios.sh" build
+
+    # Always: the keychain holding the signing key must not outlive the job,
+    # and the project's own version.lua goes back.
+    - name: Remove keychain, profile and generated files
+      if: always()
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "$ACTION_PATH/build-ios.sh" cleanup
