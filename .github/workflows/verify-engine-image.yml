@@ -30,12 +30,6 @@ jobs:
           path: engine
           sparse-checkout: platform/linux/test
 
-      - uses: actions/checkout@v6
-        with:
-          repository: chkuendig/solar2d-mcp
-          ref: f1efc5fd8d6913d51d789c52db0009341cebd3c8
-          path: mcp
-
       - name: Pull published image and verify tap support
         run: |
           docker pull "$IMAGE"
@@ -52,10 +46,14 @@ jobs:
       - name: Verify config pixel size
         run: bash engine/platform/linux/test/config-pixel-size/run.sh "$IMAGE"
 
-      - name: Verify pinned MCP recording and lifecycle regressions
+      - name: Verify the video FIFO reader tools, and no MCP server
         run: |
-          docker run --rm --cpus 2 --memory 1g --network none \
-            -e PYTHONDONTWRITEBYTECODE=1 \
-            -v "$GITHUB_WORKSPACE/mcp:/src:ro" -w /src \
-            --entrypoint python3 "$IMAGE" \
-            -m unittest discover -s tests -v
+          docker run --rm --entrypoint sh "$IMAGE" -ec '
+            python3 -c "import struct, sys"
+            ffmpeg -hide_banner -version >/dev/null
+            if ls /usr/local/lib/python3*/dist-packages/server.py >/dev/null 2>&1 ||
+               [ -e /root/.config/solar2d-mcp ]; then
+              echo "MCP server layer still present" >&2; exit 1
+            fi
+            echo "python3 and ffmpeg present; no MCP server layer"
+          '

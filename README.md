@@ -1,7 +1,7 @@
 # docker-solar2d
 
 A Linux Docker image for [Solar2D](https://solar2d.com): **HTML5 and Android builds**,
-a **headless simulator**, and an **MCP server** for driving it.
+and a **headless simulator** you can drive through two FIFOs.
 
 ```
 ghcr.io/chkuendig/solar2d:latest
@@ -31,9 +31,6 @@ docker run -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d simulate
 # One screenshot: content box pinned, app given delay-ms to reach its scene
 docker run -v $(pwd)/corona:/project -v $(pwd)/out:/output \
   -e MYAPP_PREVIEW_SCENE=home ghcr.io/chkuendig/solar2d capture home 320x480 3000
-
-# MCP server over stdio, simulator inside
-docker run -i -v $(pwd)/corona:/project ghcr.io/chkuendig/solar2d mcp
 ```
 
 ### From GitHub Actions
@@ -97,34 +94,17 @@ How the app reaches the scene you want at `delay-ms` stays the project's
 business: `capture` pins geometry and timing, your preview hook picks the
 scene through whatever env vars it already reads.
 
-### Warm MCP runtime
+### Warm runtime
 
-Keep the image warm, then start one bounded stdio server per MCP client with
-`docker exec`. Each simulator renders through its own offscreen EGL surface:
+`runtime` keeps a container idle so later `docker exec` calls can start and
+drive simulators in it without paying container start-up each time:
 
 ```bash
-mkdir -p /tmp/solar2d-review
 docker run -d --init --name solar2d-runtime \
   --cpus=1 --memory=1g --pids-limit=128 \
-  -v /absolute/workspace/root:/absolute/workspace/root \
-  -v /tmp/solar2d-review:/artifacts \
+  -v "$(pwd)/corona:/project:ro" \
   ghcr.io/chkuendig/solar2d runtime
-
-docker exec -i solar2d-runtime entrypoint.sh session
 ```
-
-The workspace bind mount must preserve its absolute path because MCP clients pass
-host project paths to the server. Encoded MP4s are exported through `/artifacts`,
-so review media can be uploaded without committing it to a repository.
-
-Simulator access is one slot per runtime. A second MCP connection stays healthy
-and receives a busy response while another client owns the simulator. The session
-command defaults to a 20-minute limit; set `SOLAR2D_MCP_SESSION_TIMEOUT` on the
-runtime container if a different bound is needed. SIGTERM and normal disconnect
-both stop only the owning session's simulator before releasing its slot.
-
-Do not enable parallel simulators yet. They still require separate homes/Solar2D
-sandboxes, temporary directories, and per-slot resource accounting.
 
 Without a keystore the Android build is signed with Android's public debug key:
 installable, not distributable. Pass `ANDROID_KEYSTORE_BASE64` and friends to sign
@@ -154,9 +134,8 @@ docker exec sim sh -c 'printf "drag 100 100 100 400 500\n" > /dev/shm/input.fifo
 ```
 
 Video readers must decode each frame's header before feeding its BGRA payload
-to ffmpeg. For projects launched through MCP, `start_video_recording` and
-`stop_video_recording` provide that relay, wall-clock pacing, and MP4 finalization.
-Full wire format and command grammar: `docs/offscreen-capture-design.md`.
+to ffmpeg; both `python3` and `ffmpeg` are in the image for readers that run
+inside the container. Full wire format and command grammar: `docs/offscreen-capture-design.md`.
 
 An HTML5 build merges anything mounted at `/html5-custom` into the web template, so
 you can ship your own `index.html`, icons and manifest.
@@ -167,23 +146,19 @@ you can ship your own `index.html`, icons and manifest.
 |---|---|
 | `Solar2DBuilder` | HTML5 + Android packager |
 | `Solar2DSimulator` | headless — offscreen EGL (llvmpipe), no X server |
-| [`solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | MCP server: run projects, screenshots, taps, logs |
+| `python3`, `ffmpeg` | for reading and encoding the video FIFO inside the container |
 | Android SDK, Gradle, JDK 17 | pre-warmed so a build does not start by downloading Gradle |
 | `.github/actions/*` | composite actions wrapping build and capture for CI consumers |
 
-## It is three repos, not one
+## It is two repos, not one
 
 Cloning this repo and building does **not** reproduce the published image on its own —
-it pulls from two forks that are part of the supply chain:
+it pulls from a fork that is part of the supply chain:
 
 | Repo | Branch | Why |
 |---|---|---|
 | [`chkuendig/docker-solar2d`](https://github.com/chkuendig/docker-solar2d) | `main` | Image, build scripts, and capture actions |
 | [`chkuendig/corona`](https://github.com/chkuendig/corona) | `linux-<tag>` (currently `linux-3734`) | Solar2D with the Linux gaps closed |
-| [`chkuendig/solar2d-mcp`](https://github.com/chkuendig/solar2d-mcp) | `main` | Linux launch fixes, shared-runtime coordination, and relay recording |
-
-The Dockerfile pins an exact MCP source commit, also retained on `video-tap`
-for image rebuilds.
 
 The Solar2D fork carries Linux fixes on its release branches, with focused
 branches for offering individual changes upstream:
@@ -228,7 +203,6 @@ Before you count on such a fix, check that the release tag contains it:
 | `SOLAR2D_REPO` / `SOLAR2D_REF` | Build a different tree or branch — an upstream tag, a PR branch, another fork |
 | `SOLAR2D_REF_SHA` | Expected commit of that branch. Verified after cloning, and busts the layer cache when the branch moves |
 | `SOLAR2D_PRS` | Space-separated upstream PR numbers, applied as diffs — e.g. `891`. For trying a PR without committing to it |
-| `SOLAR2D_MCP_REF` | solar2d-mcp commit to install |
 
 `SOLAR2D_REF_SHA` matters more than it looks. The ref is a *branch*, so its content
 moves without its name moving, and a cached `git clone` layer will happily keep

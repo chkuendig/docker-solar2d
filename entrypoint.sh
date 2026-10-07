@@ -23,22 +23,10 @@ case "${1:-}" in
     # socket for the interactive path.
     exec Solar2DSimulator "$PROJECT"
     ;;
-  mcp)
-    shift
-    exec python3 /usr/local/lib/python3.11/dist-packages/server.py
-    ;;
-  session)
-    shift
-    # No display warm-up to wait for: every simulator this server spawns
-    # renders offscreen through its own EGL pbuffer.
-    exec timeout --signal=TERM --kill-after=5s \
-      "${SOLAR2D_MCP_SESSION_TIMEOUT:-20m}" \
-      python3 /usr/local/lib/python3.11/dist-packages/server.py
-    ;;
   runtime)
-    # Keeps the container warm for docker exec MCP clients. Video recording
-    # no longer needs a shared X display: the engine frame tap streams frames
-    # from each simulator's own EGL surface (SOLAR2D_VIDEO_PIPE).
+    # Keeps the container warm for docker exec callers. No display to share:
+    # each simulator renders through its own EGL surface, and its frames and
+    # input travel through SOLAR2D_VIDEO_PIPE / SOLAR2D_INPUT_PIPE.
     shift
     echo "Solar2D runtime ready (offscreen EGL)" >&2
     exec sleep infinity
@@ -51,9 +39,7 @@ case "${1:-}" in
     echo "  build-android  Build Android APK + AAB"
     echo "  capture        One screenshot from the headless simulator (no X)"
     echo "  simulate       Run the simulator headless (offscreen EGL)"
-    echo "  mcp            Run one solar2d-mcp server in a disposable container"
-    echo "  runtime        Keep a warm container for docker exec MCP clients"
-    echo "  session        Run one bounded MCP session inside a warm runtime"
+    echo "  runtime        Keep a warm container for docker exec callers"
     echo ""
     echo "Usage:"
     echo "  docker run -v \$(pwd)/corona:/project -v \$(pwd)/output:/output solar2d build --app-name MyApp"

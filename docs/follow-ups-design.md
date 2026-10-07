@@ -2,8 +2,11 @@
 
 Status: design, 2026-10-06. Companion to `offscreen-capture-design.md`
 (read that first). Verified against the local checkouts: corona fork
-`linux-frame-tap` @ 309411d6, solar2d-mcp `video-tap` @ f1efc5f,
-docker-solar2d `ci/solar2d-ref-input` @ 1413757.
+`linux-frame-tap` @ 309411d6 (since folded into `linux-3734` and deleted),
+solar2d-mcp `video-tap` @ f1efc5f, docker-solar2d `ci/solar2d-ref-input` @
+1413757. solar2d-mcp was retired on 2026-10-07 and the image no longer ships it,
+so the MCP-chain parts below (issue 1's MCP relaunch test, CI job B) no longer
+apply; the engine-side items stand.
 
 Verification was by code reading plus small host-side measurements. Nothing
 was run against the image (the simulator counts as heavy work on this host);
@@ -216,23 +219,10 @@ simulator:
     - uses: actions/checkout@v6
     - name: Fork test scripts
       uses: actions/checkout@v6
-      with: { repository: chkuendig/corona, ref: linux-frame-tap,
+      with: { repository: chkuendig/corona, ref: linux-3734,
               sparse-checkout: platform/linux/test, path: fork }
-    - name: MCP source at the image's pinned commit
-      run: echo "ref=$(sed -n 's/^ARG SOLAR2D_MCP_REF=//p' Dockerfile)" >> "$GITHUB_OUTPUT"
-      id: mcp
-    - uses: actions/checkout@v6
-      with: { repository: chkuendig/solar2d-mcp, ref: ${{ steps.mcp.outputs.ref }}, path: mcp }
     - run: fork/platform/linux/test/native-input/run.sh "$IMAGE"
     - run: fork/platform/linux/test/video-reload/run.sh "$IMAGE"
-    - name: MCP relaunch chain inside the image
-      run: |
-        docker run --rm --cpus 2 --memory 2g \
-          -v "$PWD/mcp:/mcp:ro" -v "$PWD/out:/out" \
-          -e PYTHONPATH=/mcp -e HOME=/tmp/home \
-          -e SOLAR2D_MCP_RUNTIME_DIR=/tmp/rt -e SOLAR2D_MCP_ARTIFACT_DIR=/out \
-          -e SOLAR2D_MCP_INTEGRATION_SIMULATOR=/usr/local/bin/Solar2DSimulator \
-          --entrypoint python3 "$IMAGE" -m unittest tests.test_video_relaunch_integration -v
     - uses: actions/upload-artifact@v4
       if: failure()
       with: { name: simulator-logs, path: out }

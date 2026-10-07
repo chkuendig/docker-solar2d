@@ -168,7 +168,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # X server anywhere in the image. GTK/WebKit are deliberately absent too:
     # the Linux simulator's webview is a stub that links neither, so they
     # would be ~170MB of dead weight.
-    # MCP: ffmpeg encodes the frame tap's stream and stitches stills.
+    # Video FIFO readers inside the container: python3 parses the frame
+    # headers, ffmpeg encodes the BGRA payload.
+    python3 \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -243,27 +245,10 @@ ENV SDL_VIDEODRIVER=offscreen
 # null backend unless told, and with no sound device alcOpenDevice fails and
 # ALmixer never initializes.
 ENV ALSOFT_DRIVERS=null
-ENV SOLAR2D_MCP_ARTIFACT_DIR=/artifacts
 
 COPY build-html5.sh build-android.sh capture.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/capture.sh /usr/local/bin/entrypoint.sh
-
-# solar2d-mcp: Python MCP server for simulator control (screenshots, taps, logs).
-# The fork's linux-fixes branch carries the Linux compatibility work plus a
-# single-slot runtime lease. Separate MCP clients can share this image without
-# killing each other's simulator; competing tool calls receive a useful busy
-# response. The exact source commit is pinned for reproducible image builds.
-#   fork:     https://github.com/chkuendig/solar2d-mcp
-#   upstream: https://github.com/sensiblecoder/solar2d-mcp
-ARG SOLAR2D_MCP_REF=f1efc5fd8d6913d51d789c52db0009341cebd3c8
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && \
-    pip3 install --no-cache-dir --break-system-packages \
-      "solar2d-mcp-server @ https://github.com/chkuendig/solar2d-mcp/archive/${SOLAR2D_MCP_REF}.tar.gz" && \
-    apt-get purge -y python3-pip && \
-    rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /root/.config/solar2d-mcp && \
-    echo '{"simulator_path":"/usr/local/bin/Solar2DSimulator"}' > /root/.config/solar2d-mcp/config.json
 
 LABEL org.opencontainers.image.source=https://github.com/chkuendig/docker-solar2d
 
