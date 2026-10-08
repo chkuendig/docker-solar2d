@@ -8,13 +8,26 @@ on:
       - ".github/workflows/test-actions.yml"
       - "walk.sh"
       - "capture.sh"
+      - "Dockerfile"
   pull_request:
     paths:
       - ".github/actions/**"
       - ".github/workflows/test-actions.yml"
       - "walk.sh"
       - "capture.sh"
+      - "Dockerfile"
   workflow_dispatch:
+    inputs:
+      simulator_image:
+        description: "Image the simulator job runs the fork's engine tests against"
+        required: false
+        default: "ghcr.io/chkuendig/solar2d:latest"
+        type: string
+      simulator_fork_ref:
+        description: "chkuendig/corona ref to sparse-checkout platform/linux/test from"
+        required: false
+        default: "linux-input-tap-followups"
+        type: string
 
 jobs:
   transport:
@@ -206,3 +219,25 @@ jobs:
           const last = [...data.subarray(-3)];
           if (!(last[0] < 20 && last[1] > 230 && last[2] < 20)) throw new Error('final green state missing from video');
           JS
+
+  # The engine-level tests live in the Solar2D fork, not here: this repo's
+  # CI is the only one with the image. The fork is checked out by ref
+  # because the image does not record the fork commit it was built from, so
+  # a candidate is tested by pointing both inputs at the same branch.
+  simulator:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ${{ inputs.simulator_image || 'ghcr.io/chkuendig/solar2d:latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Fork test scripts
+        uses: actions/checkout@v6
+        with:
+          repository: chkuendig/corona
+          ref: ${{ inputs.simulator_fork_ref || 'linux-input-tap-followups' }}
+          sparse-checkout: platform/linux/test
+          path: fork
+      - name: Native input end to end
+        run: bash fork/platform/linux/test/native-input/run.sh "$IMAGE"
+      - name: Video tap survives a reload
+        run: bash fork/platform/linux/test/video-reload/run.sh "$IMAGE"
