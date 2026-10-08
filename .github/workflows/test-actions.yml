@@ -240,4 +240,5 @@ jobs:
       - name: Native input end to end
         run: bash fork/platform/linux/test/native-input/run.sh "$IMAGE"
       - name: Video tap survives a reload
+        if: always()
         run: bash fork/platform/linux/test/video-reload/run.sh "$IMAGE"
