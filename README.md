@@ -276,6 +276,9 @@ Before you count on such a fix, check that the release tag contains it:
 | `SOLAR2D_REPO` / `SOLAR2D_REF` | Build a different tree or branch — an upstream tag, a PR branch, another fork |
 | `SOLAR2D_REF_SHA` | Expected commit of that branch. Verified after cloning, and busts the layer cache when the branch moves |
 | `SOLAR2D_PRS` | Space-separated upstream PR numbers, applied as diffs — e.g. `891`. For trying a PR without committing to it |
+| `SOLAR2D_MSI_SHA256` | Optional SHA256 of the Windows MSI. When set, verified after download and before extraction; empty trusts the release URL as before |
+| `WEBTEMPLATE_URL` / `WEBTEMPLATE_SHA256` | Optional patched webtemplate: URL of a release asset plus its checksum, both set together or neither. Neither uses the MSI's template exactly as before |
+| `BUILD_JOBS` | Parallel compile jobs, integer 1..3, default 3 — replaces unbounded `nproc` parallelism |
 
 `SOLAR2D_REF_SHA` matters more than it looks. The ref is a *branch*, so its content
 moves without its name moving, and a cached `git clone` layer will happily keep
@@ -296,6 +299,35 @@ Windows MSI and macOS DMG. The Linux CMake has no Emscripten step, so it would c
 the placeholder and fail at runtime. The image extracts the real one from the MSI
 before building — along with `android-template.zip` and `Corona.aar`, which the Linux
 tree does not build either.
+
+## Patched webtemplate overrides
+
+`scripts/install-webtemplate.sh` (run by the Docker build) keeps the MSI route as the
+default. Setting `WEBTEMPLATE_URL` + `WEBTEMPLATE_SHA256` additionally downloads a
+patched webtemplate release asset, verifies its checksum, checks the zip's shape
+(nonempty `html/coronaHtml5App.wasm`, JS glue, HTML and resources entries, no
+absolute or traversal paths) and — when the asset embeds a
+`webtemplate-provenance.json` — cross-checks its engine version and fork SHA against
+the build, then installs it atomically. Any failure aborts the build; it never falls
+back to the MSI template, because shipping an unpatched engine silently is worse
+than failing loudly.
+
+What actually got staged is recorded in `/usr/local/share/solar2d/template-provenance.json`
+inside the image (origin, effective template SHA256 measured from the staged file,
+MSI and MSI-template hashes), next to `io.solar2d.*` OCI labels carrying the build
+inputs (engine version/revision, tooling revision, MSI checksum, requested template
+checksum, build jobs, Android toolchain versions).
+
+The Publish workflow's dispatch inputs mirror this: `webtemplate_url` /
+`webtemplate_sha256` (both or neither, validated in the cheap check job), an optional
+`solar2d_msi_sha256`, and candidate-tag safeguards — a dispatch carrying an override
+must pin the patched-template engine version, the fork branch and a nonempty
+`image_tag` that is not `latest`, `stable`, `release` or the release tag itself, so a
+candidate can never move a tag consumers resolve releases through.
+
+The iOS action accepts an optional `solar2d-sha256` for the macOS DMG: when set, the
+installer is verified after download and on a cache hit before mounting, and a
+mismatch fails the build and removes the file.
 
 ## Notes
 
