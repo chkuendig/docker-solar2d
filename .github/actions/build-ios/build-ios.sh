@@ -20,6 +20,11 @@ case "$cmd" in
 install)
     [ "$(uname -s)" = Darwin ] || fail "build-ios runs on macOS runners only (this is $(uname -s))"
     [[ $SOLAR2D_VERSION =~ ^[0-9]{4}\.[0-9]{4}$ ]] || fail "solar2d-version '$SOLAR2D_VERSION' is not YYYY.NNNN"
+    if [ -n "${SOLAR2D_SHA256:-}" ]; then
+        # Checked before anything is downloaded: a malformed checksum should
+        # not cost a DMG fetch.
+        [[ $SOLAR2D_SHA256 =~ ^[0-9a-f]{64}$ ]] || fail "solar2d-sha256 must be 64 lowercase hex digits, got '$SOLAR2D_SHA256'"
+    fi
     [ -d "$GITHUB_WORKSPACE/$PROJECT" ] || fail "project directory '$PROJECT' not found under the workspace root"
     [ -f "$GITHUB_WORKSPACE/$PROJECT/main.lua" ] || fail "no main.lua in '$PROJECT'"
     [ -n "$APP_NAME" ] || fail "app-name is required"
@@ -49,6 +54,17 @@ install)
         URL="https://github.com/coronalabs/corona/releases/download/${TAG}/Solar2D-macOS-${SOLAR2D_VERSION}.dmg"
         echo "Downloading $URL"
         curl -fsSL --retry 3 -o "$DMG" "$URL" || fail "could not download Solar2D $SOLAR2D_VERSION for macOS"
+    fi
+    # Verify before mount — a cache hit and a fresh download are checked the
+    # same way. A mismatch deletes the file and fails; there is no silent
+    # re-download or reuse of an unverifiable installer.
+    if [ -n "${SOLAR2D_SHA256:-}" ]; then
+        GOT=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
+        if [ "$GOT" != "$SOLAR2D_SHA256" ]; then
+            rm -f "$DMG"
+            fail "Solar2D $SOLAR2D_VERSION DMG sha256 mismatch: wanted $SOLAR2D_SHA256, got $GOT (the file was removed; nothing was mounted)"
+        fi
+        echo "DMG sha256 verified: $SOLAR2D_SHA256"
     fi
     MOUNT="$RUNNER_TEMP/solar2d-dmg"
     hdiutil attach -nobrowse -quiet -mountpoint "$MOUNT" "$DMG"

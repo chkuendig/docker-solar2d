@@ -36,6 +36,15 @@ inputs:
       use.
     required: false
     default: "2026.3734"
+  solar2d-sha256:
+    description: >-
+      Optional SHA256 (64 lowercase hex) of that release's macOS DMG. When
+      set, the installer is verified after download and on a cache hit,
+      before anything is mounted; a mismatch fails the build and removes the
+      bad file instead of installing it. Empty keeps the previous behavior
+      of trusting the release URL.
+    required: false
+    default: ""
   preflight:
     description: >-
       Install the toolchain and validate inputs without signing or building.
@@ -60,6 +69,7 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
         SOLAR2D_VERSION: ${{ inputs.solar2d-version }}
+        SOLAR2D_SHA256: ${{ inputs.solar2d-sha256 }}
         PROJECT: ${{ inputs.project }}
         APP_NAME: ${{ inputs.app-name }}
         APP_VERSION: ${{ inputs.app-version }}
