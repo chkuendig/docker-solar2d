@@ -47,6 +47,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblua5.3-dev \
     wget \
     msitools \
+    # Zip-shape and provenance-manifest checks during template staging
+    python3 \
     libgtk-3-dev \
     libwebkit2gtk-4.0-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -74,6 +76,20 @@ RUN REF="${SOLAR2D_REF:-linux-${SOLAR2D_VERSION#*.}}" && \
       [ "$GOT" = "$SOLAR2D_REF_SHA" ] || { echo "ref sha mismatch: wanted $SOLAR2D_REF_SHA, got $GOT" >&2; exit 1; }; \
     fi
 
+# Optional installer checksum. When set (64 lowercase hex digits), the MSI is
+# verified after download and before extraction. Empty keeps the historical
+# behavior of trusting the release URL.
+ARG SOLAR2D_MSI_SHA256=""
+# Optional patched webtemplate: an HTTPS URL of a version-specific fork
+# release asset plus its SHA256. Both must be set together, or neither —
+# neither means the official MSI's template is used exactly as before. A
+# failed override never falls back to the MSI template: silently shipping
+# the unpatched engine would defeat the point of the override. The ARGs feed
+# the staging RUN, so changing the URL or checksum cannot reuse a cached
+# earlier layer.
+ARG WEBTEMPLATE_URL=""
+ARG WEBTEMPLATE_SHA256=""
+
 # Replace the 0-byte webtemplate.zip placeholder with the real one from the official
 # Windows release. The source tree only ships a 0-byte placeholder — the real WASM engine
 # (coronaHtml5App.wasm + JS glue) is built by Solar2D's CI using Emscripten on macOS and
@@ -87,21 +103,8 @@ RUN REF="${SOLAR2D_REF:-linux-${SOLAR2D_VERSION#*.}}" && \
 # (the Gradle project every Android build is generated from) and Corona.aar (the
 # engine). Ant's setup-gradle-builds target looks for them under <Resources>/Native,
 # so they are staged here and copied next to the built Resources below.
-RUN wget -q "https://github.com/coronalabs/corona/releases/download/${SOLAR2D_VERSION#*.}/Solar2D-Windows-${SOLAR2D_VERSION}.msi" \
-        -O /tmp/solar2d.msi && \
-    mkdir /tmp/msi-extract && \
-    cd /tmp/msi-extract && \
-    msiextract /tmp/solar2d.msi && \
-    WEBTEMPLATE=$(find /tmp/msi-extract -name "webtemplate.zip" -print -quit) && \
-    test -n "$WEBTEMPLATE" && \
-    cp "$WEBTEMPLATE" /opt/solar2d/platform/resources/webtemplate.zip && \
-    NATIVE=$(find /tmp/msi-extract -type d -path "*/Native/Corona" -print -quit) && \
-    test -n "$NATIVE" && \
-    mkdir -p /opt/native-staging && \
-    cp -r "$NATIVE/android" "$NATIVE/shared" /opt/native-staging/ && \
-    test -f /opt/native-staging/android/resource/android-template.zip && \
-    test -f /opt/native-staging/android/lib/gradle/Corona.aar && \
-    rm -rf /tmp/msi-extract /tmp/solar2d.msi
+COPY scripts/install-webtemplate.sh /tmp/install-webtemplate.sh
+RUN bash /tmp/install-webtemplate.sh
 
 # Optional: build with upstream pull requests applied, e.g. SOLAR2D_PRS="891 935".
 # Fetched as diffs rather than merged because the clone is shallow — there is no
@@ -116,8 +119,14 @@ RUN if [ -n "$SOLAR2D_PRS" ]; then \
       done; \
     fi
 
+# Bound parallelism: `make -j$(nproc)` pins every host core for tens of
+# minutes. Validated as an integer 1..3; MAKEFLAGS is dropped so nothing can
+# smuggle unbounded parallelism past the cap.
+ARG BUILD_JOBS=3
+RUN case "$BUILD_JOBS" in [1-3]) ;; *) echo "BUILD_JOBS must be an integer 1..3 (got '$BUILD_JOBS')" >&2; exit 1 ;; esac
+
 WORKDIR /opt/solar2d/build
-RUN cmake .. && make -j$(nproc) Solar2DBuilder Solar2DSimulator
+RUN env -u MAKEFLAGS cmake .. && env -u MAKEFLAGS make -j"$BUILD_JOBS" Solar2DBuilder Solar2DSimulator
 
 # The Native tree is not built on Linux at all, so cmake has nothing to copy.
 # (AndroidValidation.lua was staged here too until the fork's CMakeResources.txt
@@ -186,6 +195,11 @@ COPY --from=compile /opt/solar2d/build/Resources/ /usr/local/share/solar2d/Resou
 RUN ln -s /usr/local/share/solar2d/Resources /usr/local/bin/Resources && \
     ln -s /usr/local/bin/Solar2DBuilder /usr/local/share/solar2d/Solar2DBuilder
 
+# What the compile stage actually staged and verified: engine version, fork
+# and MSI SHAs, the webtemplate's origin and its EFFECTIVE sha256 — measured
+# from the final staged file, not repeated from the build arguments below.
+COPY --from=compile /opt/template-provenance.json /usr/local/share/solar2d/template-provenance.json
+
 # Android SDK. compileSdk/targetSdk are 35 in Solar2D's Gradle template; build-tools
 # must match. android-36 is installed next to it because a project can raise its own
 # target: every platform a build may compile against has to be present at image build
@@ -250,7 +264,28 @@ COPY build-html5.sh build-android.sh capture.sh walk.sh walk-video.py /usr/local
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/build-html5.sh /usr/local/bin/build-android.sh /usr/local/bin/capture.sh /usr/local/bin/walk.sh /usr/local/bin/entrypoint.sh
 
-LABEL org.opencontainers.image.source=https://github.com/chkuendig/docker-solar2d
+# Provenance labels record the build inputs. The toolchain ARGs above repeat
+# here because ARG and LABEL live in separate namespaces. The webtemplate's
+# EFFECTIVE checksum cannot be a label — it is only known inside the compile
+# stage — so it lives in template-provenance.json copied in above.
+ARG TOOLING_SHA=""
+ARG SOLAR2D_VERSION
+ARG SOLAR2D_REF_SHA=""
+ARG SOLAR2D_MSI_SHA256=""
+ARG WEBTEMPLATE_URL=""
+ARG WEBTEMPLATE_SHA256=""
+ARG BUILD_JOBS=3
+LABEL org.opencontainers.image.source=https://github.com/chkuendig/docker-solar2d \
+      io.solar2d.engine.version=$SOLAR2D_VERSION \
+      io.solar2d.engine.revision=$SOLAR2D_REF_SHA \
+      io.solar2d.tooling.revision=$TOOLING_SHA \
+      io.solar2d.msi.sha256=$SOLAR2D_MSI_SHA256 \
+      io.solar2d.webtemplate.override-url=$WEBTEMPLATE_URL \
+      io.solar2d.webtemplate.requested-sha256=$WEBTEMPLATE_SHA256 \
+      io.solar2d.build.jobs=$BUILD_JOBS \
+      io.solar2d.android.cmdline-tools=$ANDROID_CMDLINE_TOOLS \
+      io.solar2d.android.api=$ANDROID_API \
+      io.solar2d.android.build-tools=$ANDROID_BUILD_TOOLS
 
 # Plain working dirs, deliberately NOT a VOLUME. A VOLUME here forces Docker to
 # create an anonymous volume on every `docker run` that does not bind all three
