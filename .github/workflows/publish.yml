@@ -23,6 +23,15 @@ on:
       solar2d_ref:
         description: "Branch of the Solar2D fork to build. Defaults to linux-<tag>. Use with image_tag to try a fix before it reaches an integration branch."
         required: false
+      webtemplate_url:
+        description: "Optional HTTPS URL of a patched webtemplate.zip release asset. When set, webtemplate_sha256 is required too; empty means the official MSI template as usual."
+        required: false
+      webtemplate_sha256:
+        description: "SHA256 (64 lowercase hex) of the webtemplate_url asset. Required together with webtemplate_url."
+        required: false
+      solar2d_msi_sha256:
+        description: "Optional SHA256 (64 lowercase hex) of the official Windows MSI; verified before extraction. Required when a webtemplate override is used."
+        required: false
 
 env:
   REGISTRY: ghcr.io
@@ -30,6 +39,9 @@ env:
   # ghcr.io/chkuendig/docker-solar2d — "docker" twice in a registry path — and
   # would silently move the image everyone pulls if the repo is ever renamed.
   IMAGE_NAME: chkuendig/solar2d
+  # The one engine version a patched webtemplate exists for. A dispatch that
+  # overrides the template must pin exactly this version.
+  PATCHED_TEMPLATE_VERSION: "2026.3736"
 
 jobs:
   check:
@@ -42,6 +54,10 @@ jobs:
       solar2d_ref: ${{ steps.forkref.outputs.branch }}
 
     steps:
+      # For scripts/check-publish-inputs.sh below; nothing else here reads
+      # the tree.
+      - uses: actions/checkout@v6
+
       - name: Resolve Solar2D version
         id: resolve
         env:
@@ -67,6 +83,22 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Resolved Solar2D version: $VERSION (tag: $TAG)"
+
+      # Cheap gate before any expensive work: candidate-tag and
+      # URL/checksum pairing rules, and the full set of pins an override
+      # build must carry. Fails here instead of deep inside the image build.
+      - name: Validate dispatch inputs
+        env:
+          INPUT_SOLAR2D_VERSION: ${{ inputs.solar2d_version }}
+          INPUT_SOLAR2D_REF: ${{ inputs.solar2d_ref }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_WEBTEMPLATE_URL: ${{ inputs.webtemplate_url }}
+          INPUT_WEBTEMPLATE_SHA256: ${{ inputs.webtemplate_sha256 }}
+          INPUT_SOLAR2D_MSI_SHA256: ${{ inputs.solar2d_msi_sha256 }}
+          RESOLVED_VERSION: ${{ steps.resolve.outputs.version }}
+          RESOLVED_TAG: ${{ steps.resolve.outputs.tag }}
+          PATCHED_TEMPLATE_VERSION: ${{ env.PATCHED_TEMPLATE_VERSION }}
+        run: bash scripts/check-publish-inputs.sh
 
       # The image builds from a branch of our Solar2D fork, so its content moves
       # without its name moving. Resolve it here: it pins the build, busts the
@@ -169,5 +201,12 @@ jobs:
             SOLAR2D_VERSION=${{ needs.check.outputs.solar2d_version }}
             SOLAR2D_REF=${{ needs.check.outputs.solar2d_ref }}
             SOLAR2D_REF_SHA=${{ needs.check.outputs.solar2d_ref_sha }}
+            SOLAR2D_MSI_SHA256=${{ inputs.solar2d_msi_sha256 }}
+            WEBTEMPLATE_URL=${{ inputs.webtemplate_url }}
+            WEBTEMPLATE_SHA256=${{ inputs.webtemplate_sha256 }}
+            TOOLING_SHA=${{ github.sha }}
+          # The template ARGs feed the staging RUN inside the build, so a
+          # changed URL or checksum cannot reuse a cached earlier layer —
+          # the gha cache key follows the build inputs.
           cache-from: type=gha
           cache-to: type=gha,mode=max
