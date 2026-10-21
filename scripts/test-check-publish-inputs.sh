@@ -54,6 +54,21 @@ INPUT_IMAGE_TAG=3736
 expect_fail "candidate tag equals the release tag" 'reserved'
 INPUT_IMAGE_TAG=release
 expect_fail "candidate tag 'release'" 'reserved'
+
+# Strict single-tag syntax: metadata-action parses the tag line as CSV, so
+# "latest,priority=1000" or " latest" would smuggle extra labels or alias a
+# reserved name there. These must be rejected by format, before (and
+# independently of) the reserved-name comparison.
+INPUT_IMAGE_TAG='latest,priority=1000'
+expect_fail "candidate tag with a CSV label payload" 'single Docker tag'
+INPUT_IMAGE_TAG='stable,priority=1000'
+expect_fail "CSV payload against 'stable'" 'single Docker tag'
+INPUT_IMAGE_TAG='3736,priority=1000'
+expect_fail "release tag plus CSV payload" 'single Docker tag'
+INPUT_IMAGE_TAG=' latest'
+expect_fail "candidate tag with leading whitespace" 'single Docker tag'
+INPUT_IMAGE_TAG='Latest'
+expect_ok "reserved comparison is case-sensitive: 'Latest' is a distinct, valid tag"
 INPUT_IMAGE_TAG=
 
 # Pairing and format.
@@ -63,13 +78,18 @@ INPUT_WEBTEMPLATE_URL=
 INPUT_WEBTEMPLATE_SHA256=$SHA
 expect_fail "checksum without URL" 'set together'
 INPUT_WEBTEMPLATE_URL=https://example.com/webtemplate.zip
-INPUT_WEBTEMPLATE_SHA256=ABCDEF
-expect_fail "malformed checksum" '64 lowercase hex'
+# Correct length, valid hex digits, uppercase: hashes are lowercase-only
+# (the form sha256sum prints), so this must be rejected on content, not
+# length.
+INPUT_WEBTEMPLATE_SHA256=$(printf 'A%.0s' {1..64})
+expect_fail "uppercase checksum" '64 lowercase hex'
 INPUT_WEBTEMPLATE_SHA256=${SHA}0
 expect_fail "wrong-length checksum" '64 lowercase hex'
 INPUT_WEBTEMPLATE_SHA256=$SHA
 INPUT_SOLAR2D_MSI_SHA256=nope
 expect_fail "malformed MSI checksum" '64 lowercase hex'
+INPUT_SOLAR2D_MSI_SHA256=$(printf 'B%.0s' {1..64})
+expect_fail "uppercase MSI checksum" '64 lowercase hex'
 INPUT_SOLAR2D_MSI_SHA256=$SHA2
 
 # An override is a candidate acceptance build: every pin is required.
@@ -92,4 +112,18 @@ INPUT_SOLAR2D_MSI_SHA256=$SHA2
 expect_ok "fully pinned candidate override"
 grep -q 'candidate build' "$WORK/out.log"
 
-echo 'check-publish-inputs checks passed (default, reserved tags, pairing, override pins)'
+# A webtemplate_url that is not one clean https URL must be rejected even
+# with every other pin present: publish.yml feeds it verbatim into
+# build-args, so an embedded newline injects a second assignment there.
+INPUT_WEBTEMPLATE_URL=$'https://example.com/t.zip\nSOLAR2D_REF_SHA=x'
+expect_fail "webtemplate_url with an embedded newline (input injection)" 'single https:// URL'
+INPUT_WEBTEMPLATE_URL=$'https://example.com/t.zip\tSOLAR2D_REF_SHA=x'
+expect_fail "webtemplate_url with a tab" 'single https:// URL'
+INPUT_WEBTEMPLATE_URL='http://example.com/t.zip'
+expect_fail "webtemplate_url that is not https" 'single https:// URL'
+INPUT_WEBTEMPLATE_URL=' https://example.com/t.zip'
+expect_fail "webtemplate_url with leading whitespace" 'single https:// URL'
+INPUT_WEBTEMPLATE_URL=https://example.com/webtemplate.zip
+expect_ok "fully pinned candidate override with a clean https URL"
+
+echo 'check-publish-inputs checks passed (default, tag syntax, reserved tags, pairing, override pins, URL shape)'
