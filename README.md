@@ -311,7 +311,7 @@ carries — nonempty `html/coronaHtml5App.wasm`, `html/coronaHtml5App.js`,
 `fbinstant/` files (`fbapp-config.json`, `index.html`, `gulpfile.js`,
 `css/style.css`) and at least one nonempty `res_widget/*.png` (the widget PNGs are
 repackaged by the same packaging script as the runtime, so the directory must be
-nonempty rather than pinned to the full 17-name set; no absolute or traversal
+nonempty rather than pinned to its 16 PNG filenames; no absolute or traversal
 paths) — and requires the
 artifact to embed a `webtemplate-provenance.json` whose `engine_version` and `fork_sha`
 are nonempty strings matching the build's `SOLAR2D_VERSION` / `SOLAR2D_REF_SHA`
