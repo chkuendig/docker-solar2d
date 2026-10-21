@@ -18,9 +18,9 @@
 #   SOLAR2D_MSI_SHA256  verify the MSI before extraction (64 lowercase hex)
 #   WEBTEMPLATE_URL     HTTPS URL of a patched webtemplate.zip
 #   WEBTEMPLATE_SHA256  its checksum; both-or-neither with the URL
-#   SOLAR2D_REF_SHA     expected fork commit; cross-checked against the
-#                       artifact's embedded provenance manifest when the
-#                       artifact carries one
+#   SOLAR2D_REF_SHA     required with an override: the fork commit the
+#                       artifact's embedded webtemplate-provenance.json
+#                       must carry, alongside the engine version
 #   RESOURCES_DIR       where webtemplate.zip is staged
 #   NATIVE_STAGING      where the MSI's Native/Corona pieces are staged
 #   PROVENANCE_OUT      JSON record of what was actually staged
@@ -51,6 +51,10 @@ fi
     || fail "WEBTEMPLATE_SHA256 must be 64 lowercase hex digits, got '$WEBTEMPLATE_SHA256'"
 [ -z "$SOLAR2D_MSI_SHA256" ] || is_hex64 "$SOLAR2D_MSI_SHA256" \
     || fail "SOLAR2D_MSI_SHA256 must be 64 lowercase hex digits, got '$SOLAR2D_MSI_SHA256'"
+if [ -n "$WEBTEMPLATE_URL" ]; then
+    [ -n "$SOLAR2D_REF_SHA" ] \
+        || fail "a webtemplate override requires SOLAR2D_REF_SHA: the artifact's provenance manifest is cross-checked against it"
+fi
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -99,7 +103,7 @@ else
         || fail "webtemplate sha256 mismatch: wanted $WEBTEMPLATE_SHA256, got $GOT — NOT falling back to the MSI template"
 
     # Shape and provenance checks before the file is allowed near Resources:
-    # a placeholder or malformed archive must fail the build here.
+    # a placeholder, corrupt or unattributed archive must fail the build here.
     python3 - "$OVERRIDE" <<'PYVALIDATE' || fail "the override zip failed validation (errors above)"
 import json, os, sys, zipfile
 
@@ -112,31 +116,42 @@ def bad(msg):
     sys.exit(1)
 
 with zipfile.ZipFile(path) as z:
+    corrupt = z.testzip()
+    if corrupt is not None:
+        bad(f"zip integrity check failed at entry '{corrupt}' (CRC mismatch)")
     names = z.namelist()
     for name in names:
         if name.startswith(("/", "\\")) or ".." in name.split("/"):
             bad(f"unsafe entry '{name}'")
-    for name in ("html/coronaHtml5App.wasm", "html/coronaHtml5App.js"):
+    # The exact entries the default MSI template carries — a patched
+    # template is a rebuild of that layout, not an arbitrary zip that
+    # happens to contain a wasm somewhere.
+    for name in ("html/coronaHtml5App.wasm", "html/coronaHtml5App.js",
+                 "html/index.html", "html/resources/CORONA_LOGO.png"):
         if name not in names:
             bad(f"missing entry '{name}'")
         if z.getinfo(name).file_size == 0:
             bad(f"entry '{name}' is empty")
-    if not any(n.startswith("html/") and n.endswith(".html") and z.getinfo(n).file_size > 0 for n in names):
-        bad("no nonempty html/*.html entry")
-    if not any(n.startswith("html/resources/") and z.getinfo(n).file_size > 0 for n in names):
-        bad("no nonempty html/resources/ entry")
 
-    if "webtemplate-provenance.json" in names:
-        try:
-            manifest = json.loads(z.read("webtemplate-provenance.json"))
-        except ValueError as e:
-            bad(f"webtemplate-provenance.json is not valid JSON: {e}")
-        manifest_version = manifest.get("engine_version")
-        if manifest_version and version and manifest_version != version:
-            bad(f"provenance engine_version {manifest_version} does not match SOLAR2D_VERSION {version}")
-        manifest_fork = manifest.get("fork_sha")
-        if manifest_fork and ref_sha and manifest_fork != ref_sha:
-            bad(f"provenance fork_sha {manifest_fork} does not match SOLAR2D_REF_SHA {ref_sha}")
+    # Provenance is not optional for an override: the manifest is what ties
+    # the artifact to the engine version and fork commit it was built for.
+    if "webtemplate-provenance.json" not in names:
+        bad("missing webtemplate-provenance.json — an override must carry its provenance manifest")
+    try:
+        manifest = json.loads(z.read("webtemplate-provenance.json"))
+    except ValueError as e:
+        bad(f"webtemplate-provenance.json is not valid JSON: {e}")
+    if not isinstance(manifest, dict):
+        bad("webtemplate-provenance.json must be a JSON object")
+    for field, env_name, expected in (
+        ("engine_version", "SOLAR2D_VERSION", version),
+        ("fork_sha", "SOLAR2D_REF_SHA", ref_sha),
+    ):
+        value = manifest.get(field)
+        if not isinstance(value, str) or not value:
+            bad(f"provenance {field} must be a nonempty string in webtemplate-provenance.json")
+        if expected and value != expected:
+            bad(f"provenance {field} {value} does not match {env_name} {expected}")
 PYVALIDATE
 
     # Atomic install: a half-written template must never be visible to CMake.
