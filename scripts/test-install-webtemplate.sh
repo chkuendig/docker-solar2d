@@ -21,20 +21,54 @@ import sys
 import zipfile
 
 out, mode, manifest = sys.argv[1:4]
+
+# The layout of the official webtemplate.zip (2026.3736): five html/ files,
+# four fbinstant/ files and a populated res_widget/. The negatives below
+# drop one piece of it; "oldlayout" is the pre-correction four-entry
+# archive the validator used to accept.
+REAL_LAYOUT = {
+    "html/coronaHtml5App.wasm": b"wasm-engine-bytes" * 8,
+    "html/coronaHtml5App.js": b"// js glue",
+    "html/index.html": b"<html></html>",
+    "html/index-debug.html": b"<html debug></html>",
+    "html/index-nosplash.html": b"<html nosplash></html>",
+    "fbinstant/fbapp-config.json": b'{"instant_games": {}}',
+    "fbinstant/index.html": b"<html fb></html>",
+    "fbinstant/gulpfile.js": b"// gulp",
+    "fbinstant/css/style.css": b"body {}",
+    "res_widget/widget_theme_ios.png": b"png",
+}
+SKIP = {
+    "nowasm": {"html/coronaHtml5App.wasm"},
+    "noindex": {"html/index.html"},
+    "nodebug": {"html/index-debug.html"},
+    "nofbapp": {"fbinstant/fbapp-config.json"},
+    "nowidget": {"res_widget/widget_theme_ios.png"},
+}
+# The new-rule negatives also carry html/resources/CORONA_LOGO.png, the
+# old validator's required entry, so each archive passes the old four-file
+# check and only the new rules reject it (fail-first evidence).
+LEGACY = {"nodebug", "nofbapp", "nowidget"}
+
 with zipfile.ZipFile(out, "w") as z:
-    if mode == "placeholder":
-        z.writestr("html/coronaHtml5App.wasm", b"")
-    elif mode != "nowasm":
+    if mode == "oldlayout":
         z.writestr("html/coronaHtml5App.wasm", b"wasm-engine-bytes" * 8)
-    z.writestr("html/coronaHtml5App.js", b"// js glue")
-    if mode == "noindex":
-        z.writestr("html/index2.html", b"<html></html>")
-    else:
+        z.writestr("html/coronaHtml5App.js", b"// js glue")
         z.writestr("html/index.html", b"<html></html>")
-    if mode == "nologo":
-        z.writestr("html/resources/other.png", b"png")
-    else:
         z.writestr("html/resources/CORONA_LOGO.png", b"png")
+    else:
+        skip = SKIP.get(mode, set())
+        for name, data in REAL_LAYOUT.items():
+            if name in skip:
+                continue
+            if mode == "placeholder" and name == "html/coronaHtml5App.wasm":
+                z.writestr(name, b"")
+            else:
+                z.writestr(name, data)
+        if mode == "nowidget":
+            z.writestr("res_widget/", b"")   # directory entry, no pngs
+        if mode in LEGACY:
+            z.writestr("html/resources/CORONA_LOGO.png", b"png")
     if mode == "traversal":
         z.writestr("../evil.txt", b"escape")
     if manifest:
@@ -53,7 +87,10 @@ make_override "$WORK/emptymanifest.zip" "" '{}'
 make_override "$WORK/nofork.zip" "" '{"engine_version": "2026.3736"}'
 make_override "$WORK/wrongtype.zip" "" '{"engine_version": 2026.3736, "fork_sha": "'"$FORK_SHA"'"}'
 make_override "$WORK/noindex.zip" noindex "$GOOD_MANIFEST"
-make_override "$WORK/nologo.zip" nologo "$GOOD_MANIFEST"
+make_override "$WORK/nodebug.zip" nodebug "$GOOD_MANIFEST"
+make_override "$WORK/nofbapp.zip" nofbapp "$GOOD_MANIFEST"
+make_override "$WORK/nowidget.zip" nowidget "$GOOD_MANIFEST"
+make_override "$WORK/oldlayout.zip" oldlayout "$GOOD_MANIFEST"
 make_override "$WORK/corrupt.zip" "" "$GOOD_MANIFEST"
 # A CRC-broken archive: flip one byte inside the stored wasm payload, past
 # its local file header, so the zip opens and lists fine but fails an
@@ -94,7 +131,10 @@ case "$url" in
     https://example.com/nofork.zip)      cat "$NOFORK_FIXTURE" > "$out" ;;
     https://example.com/wrongtype.zip)   cat "$WRONGTYPE_FIXTURE" > "$out" ;;
     https://example.com/noindex.zip)     cat "$NOINDEX_FIXTURE" > "$out" ;;
-    https://example.com/nologo.zip)      cat "$NOLOGO_FIXTURE" > "$out" ;;
+    https://example.com/nodebug.zip)     cat "$NODEBUG_FIXTURE" > "$out" ;;
+    https://example.com/nofbapp.zip)     cat "$NOFBAPP_FIXTURE" > "$out" ;;
+    https://example.com/nowidget.zip)    cat "$NOWIDGET_FIXTURE" > "$out" ;;
+    https://example.com/oldlayout.zip)   cat "$OLDLAYOUT_FIXTURE" > "$out" ;;
     https://example.com/corrupt.zip)     cat "$CORRUPT_FIXTURE" > "$out" ;;
     https://example.com/missing.zip)     exit 1 ;;
     *) echo "wget shim: unexpected url $url" >&2; exit 2 ;;
@@ -118,8 +158,9 @@ export NOWASM_FIXTURE="$WORK/nowasm.zip" TRAVERSAL_FIXTURE="$WORK/traversal.zip"
 export WRONGVERSION_FIXTURE="$WORK/wrongversion.zip" WRONGFORK_FIXTURE="$WORK/wrongfork.zip"
 export NOMANIFEST_FIXTURE="$WORK/nomanifest.zip" EMPTYMANIFEST_FIXTURE="$WORK/emptymanifest.zip"
 export NOFORK_FIXTURE="$WORK/nofork.zip" WRONGTYPE_FIXTURE="$WORK/wrongtype.zip"
-export NOINDEX_FIXTURE="$WORK/noindex.zip" NOLOGO_FIXTURE="$WORK/nologo.zip"
-export CORRUPT_FIXTURE="$WORK/corrupt.zip"
+export NOINDEX_FIXTURE="$WORK/noindex.zip" NODEBUG_FIXTURE="$WORK/nodebug.zip"
+export NOFBAPP_FIXTURE="$WORK/nofbapp.zip" NOWIDGET_FIXTURE="$WORK/nowidget.zip"
+export OLDLAYOUT_FIXTURE="$WORK/oldlayout.zip" CORRUPT_FIXTURE="$WORK/corrupt.zip"
 export SOLAR2D_VERSION=2026.3736
 export RESOURCES_DIR="$WORK/resources" NATIVE_STAGING="$WORK/native-staging"
 export PROVENANCE_OUT="$WORK/provenance.json"
@@ -218,7 +259,7 @@ staged_unchanged
 
 reset_case
 export WEBTEMPLATE_URL=https://example.com/good.zip WEBTEMPLATE_SHA256=$GOOD_SHA SOLAR2D_REF_SHA=$FORK_SHA
-expect_ok "override: verified artifact replaces the MSI template"
+expect_ok "override: verified real-layout artifact replaces the MSI template"
 cmp -s "$RESOURCES_DIR/webtemplate.zip" "$WORK/good.zip"
 grep -q '"origin": "webtemplate-override"' "$PROVENANCE_OUT"
 grep -qF "\"sha256\": \"$GOOD_SHA\"" "$PROVENANCE_OUT"
@@ -315,12 +356,29 @@ staged_unchanged
 
 reset_case
 override_env https://example.com/noindex.zip "$(sha256sum "$WORK/noindex.zip" | cut -d' ' -f1)"
-expect_fail "zip without the template's html/index.html" "missing entry 'html/index.html'"
+expect_fail "real layout without the template's html/index.html" "missing entry 'html/index.html'"
+staged_unchanged
+
+# New-rule negatives: each fixture carries html/resources/CORONA_LOGO.png,
+# so the pre-correction validator accepted it — these fail on 32e140c.
+reset_case
+override_env https://example.com/nodebug.zip "$(sha256sum "$WORK/nodebug.zip" | cut -d' ' -f1)"
+expect_fail "real layout without html/index-debug.html" "missing entry 'html/index-debug.html'"
 staged_unchanged
 
 reset_case
-override_env https://example.com/nologo.zip "$(sha256sum "$WORK/nologo.zip" | cut -d' ' -f1)"
-expect_fail "zip without the template's html/resources/CORONA_LOGO.png" "missing entry 'html/resources/CORONA_LOGO.png'"
+override_env https://example.com/nofbapp.zip "$(sha256sum "$WORK/nofbapp.zip" | cut -d' ' -f1)"
+expect_fail "real layout without fbinstant/fbapp-config.json" "missing entry 'fbinstant/fbapp-config.json'"
+staged_unchanged
+
+reset_case
+override_env https://example.com/nowidget.zip "$(sha256sum "$WORK/nowidget.zip" | cut -d' ' -f1)"
+expect_fail "real layout with an empty res_widget/ (no widget png)" 'res_widget'
+staged_unchanged
+
+reset_case
+override_env https://example.com/oldlayout.zip "$(sha256sum "$WORK/oldlayout.zip" | cut -d' ' -f1)"
+expect_fail "old four-entry layout (CORONA_LOGO.png, no index-debug/fbinstant/res_widget)" "missing entry 'html/index-debug.html'"
 staged_unchanged
 
 # Provenance manifest: required, well-formed, and matching — an unattributed

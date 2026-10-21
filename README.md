@@ -305,9 +305,14 @@ tree does not build either.
 `scripts/install-webtemplate.sh` (run by the Docker build) keeps the MSI route as the
 default. Setting `WEBTEMPLATE_URL` + `WEBTEMPLATE_SHA256` additionally downloads a
 patched webtemplate release asset, verifies its checksum, runs a zip integrity test
-(CRC check of every entry), requires exactly the entries the default MSI template
-carries (nonempty `html/coronaHtml5App.wasm`, JS glue, `html/index.html` and
-`html/resources/CORONA_LOGO.png`, no absolute or traversal paths) and requires the
+(CRC check of every entry), requires the entries the official `webtemplate.zip`
+carries — nonempty `html/coronaHtml5App.wasm`, `html/coronaHtml5App.js`,
+`html/index.html`, `html/index-debug.html` and `html/index-nosplash.html`, the four
+`fbinstant/` files (`fbapp-config.json`, `index.html`, `gulpfile.js`,
+`css/style.css`) and at least one nonempty `res_widget/*.png` (the widget PNGs are
+repackaged by the same packaging script as the runtime, so the directory must be
+nonempty rather than pinned to the full 17-name set; no absolute or traversal
+paths) — and requires the
 artifact to embed a `webtemplate-provenance.json` whose `engine_version` and `fork_sha`
 are nonempty strings matching the build's `SOLAR2D_VERSION` / `SOLAR2D_REF_SHA`
 (`SOLAR2D_REF_SHA` is mandatory with an override). It then installs the template

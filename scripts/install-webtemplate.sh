@@ -123,15 +123,24 @@ with zipfile.ZipFile(path) as z:
     for name in names:
         if name.startswith(("/", "\\")) or ".." in name.split("/"):
             bad(f"unsafe entry '{name}'")
-    # The exact entries the default MSI template carries — a patched
+    # The entries the official webtemplate.zip carries — a patched
     # template is a rebuild of that layout, not an arbitrary zip that
-    # happens to contain a wasm somewhere.
+    # happens to contain a wasm somewhere. The res_widget/ set is not
+    # pinned name by name: the widget PNGs are repackaged by the same
+    # packaging script as the runtime, so a patched rebuild carries them,
+    # but the roster can change — the directory just has to be nonempty.
     for name in ("html/coronaHtml5App.wasm", "html/coronaHtml5App.js",
-                 "html/index.html", "html/resources/CORONA_LOGO.png"):
+                 "html/index.html", "html/index-debug.html",
+                 "html/index-nosplash.html", "fbinstant/fbapp-config.json",
+                 "fbinstant/index.html", "fbinstant/gulpfile.js",
+                 "fbinstant/css/style.css"):
         if name not in names:
             bad(f"missing entry '{name}'")
         if z.getinfo(name).file_size == 0:
             bad(f"entry '{name}' is empty")
+    if not any(name.startswith("res_widget/") and name.endswith(".png")
+               and z.getinfo(name).file_size > 0 for name in names):
+        bad("no nonempty res_widget/*.png entry — the widget asset set is missing")
 
     # Provenance is not optional for an override: the manifest is what ties
     # the artifact to the engine version and fork commit it was built for.
