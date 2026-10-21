@@ -108,8 +108,14 @@ RUN bash /tmp/install-webtemplate.sh
 
 # Optional: build with upstream pull requests applied, e.g. SOLAR2D_PRS="891 935".
 # Fetched as diffs rather than merged because the clone is shallow — there is no
-# common history to merge against.
+# common history to merge against. Mutually exclusive with a webtemplate
+# override: a PR can change the engine out from under the verified template,
+# so that combination is rejected instead of built.
 ARG SOLAR2D_PRS=""
+RUN if [ -n "$SOLAR2D_PRS" ] && [ -n "$WEBTEMPLATE_URL" ]; then \
+      echo "SOLAR2D_PRS must be empty when WEBTEMPLATE_URL is set: a PR stack can change the engine out from under the verified template override" >&2; \
+      exit 1; \
+    fi
 RUN if [ -n "$SOLAR2D_PRS" ]; then \
       cd /opt/solar2d && \
       for pr in $SOLAR2D_PRS; do \

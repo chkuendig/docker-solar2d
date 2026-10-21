@@ -27,6 +27,7 @@ jobs:
       - run: python3 .github/actions/walk/test_walk_video.py
       - run: bash scripts/test-check-publish-inputs.sh
       - run: bash scripts/test-install-webtemplate.sh
+      - run: bash scripts/test-dockerfile-guards.sh
 
   html5:
     runs-on: ubuntu-latest

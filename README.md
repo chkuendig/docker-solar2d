@@ -275,7 +275,7 @@ Before you count on such a fix, check that the release tag contains it:
 | `SOLAR2D_VERSION` | Release to build, e.g. `2026.3734`. Picks the MSI and the default fork branch |
 | `SOLAR2D_REPO` / `SOLAR2D_REF` | Build a different tree or branch — an upstream tag, a PR branch, another fork |
 | `SOLAR2D_REF_SHA` | Expected commit of that branch. Verified after cloning, and busts the layer cache when the branch moves |
-| `SOLAR2D_PRS` | Space-separated upstream PR numbers, applied as diffs — e.g. `891`. For trying a PR without committing to it |
+| `SOLAR2D_PRS` | Space-separated upstream PR numbers, applied as diffs — e.g. `891`. For trying a PR without committing to it. Mutually exclusive with `WEBTEMPLATE_URL` |
 | `SOLAR2D_MSI_SHA256` | Optional SHA256 of the Windows MSI. When set, verified after download and before extraction; empty trusts the release URL as before |
 | `WEBTEMPLATE_URL` / `WEBTEMPLATE_SHA256` | Optional patched webtemplate: URL of a release asset plus its checksum, both set together or neither. Neither uses the MSI's template exactly as before |
 | `BUILD_JOBS` | Parallel compile jobs, integer 1..3, default 3 — replaces unbounded `nproc` parallelism |
@@ -304,13 +304,16 @@ tree does not build either.
 
 `scripts/install-webtemplate.sh` (run by the Docker build) keeps the MSI route as the
 default. Setting `WEBTEMPLATE_URL` + `WEBTEMPLATE_SHA256` additionally downloads a
-patched webtemplate release asset, verifies its checksum, checks the zip's shape
-(nonempty `html/coronaHtml5App.wasm`, JS glue, HTML and resources entries, no
-absolute or traversal paths) and — when the asset embeds a
-`webtemplate-provenance.json` — cross-checks its engine version and fork SHA against
-the build, then installs it atomically. Any failure aborts the build; it never falls
-back to the MSI template, because shipping an unpatched engine silently is worse
-than failing loudly.
+patched webtemplate release asset, verifies its checksum, runs a zip integrity test
+(CRC check of every entry), requires exactly the entries the default MSI template
+carries (nonempty `html/coronaHtml5App.wasm`, JS glue, `html/index.html` and
+`html/resources/CORONA_LOGO.png`, no absolute or traversal paths) and requires the
+artifact to embed a `webtemplate-provenance.json` whose `engine_version` and `fork_sha`
+are nonempty strings matching the build's `SOLAR2D_VERSION` / `SOLAR2D_REF_SHA`
+(`SOLAR2D_REF_SHA` is mandatory with an override). It then installs the template
+atomically — staged to a hidden file, renamed into place — so CMake never sees a
+half-written template. Any failure aborts the build; it never falls back to the MSI
+template, because shipping an unpatched engine silently is worse than failing loudly.
 
 What actually got staged is recorded in `/usr/local/share/solar2d/template-provenance.json`
 inside the image (origin, effective template SHA256 measured from the staged file,
@@ -323,7 +326,12 @@ The Publish workflow's dispatch inputs mirror this: `webtemplate_url` /
 `solar2d_msi_sha256`, and candidate-tag safeguards — a dispatch carrying an override
 must pin the patched-template engine version, the fork branch and a nonempty
 `image_tag` that is not `latest`, `stable`, `release` or the release tag itself, so a
-candidate can never move a tag consumers resolve releases through.
+candidate can never move a tag consumers resolve releases through. `image_tag` must
+also be a single, strictly-formed Docker tag (`[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`, no
+commas or whitespace — the tag line is parsed as CSV downstream) and `webtemplate_url`
+a single `https://` URL without whitespace or control characters; the reserved-name
+comparison is case-sensitive, as Docker tags are. All SHA256 inputs are lowercase hex
+only — the exact form `sha256sum` prints; uppercase variants are rejected.
 
 The iOS action accepts an optional `solar2d-sha256` for the macOS DMG: when set, the
 installer is verified after download and on a cache hit before mounting, and a
