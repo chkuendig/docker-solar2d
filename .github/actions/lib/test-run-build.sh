@@ -48,6 +48,9 @@ set -euo pipefail
 printf '%q ' "$@" >> "$CALLS"; printf '\n' >> "$CALLS"
 case "$1" in
     create) echo fake-id ;;
+    rm)
+        if [ -n "${FAIL_DOCKER_RM:-}" ]; then exit 1; fi
+        ;;
     exec)
         if [[ " $* " == *' /usr/local/bin/entrypoint.sh '* ]]; then
             if [ -n "${BUILD_SIGNAL:-}" ]; then kill -s "$BUILD_SIGNAL" "$PPID"; fi
@@ -81,6 +84,14 @@ case "$1" in
 esac
 DOCKER
 chmod +x "$WORK/bin/docker"
+cat > "$WORK/bin/chmod" <<'CHMOD'
+#!/bin/bash
+if [ -n "${FAIL_CHMOD:-}" ] && [[ "$*" == *'.solar2d-gradle.'* ]]; then
+    exit 1
+fi
+exec /usr/bin/chmod "$@"
+CHMOD
+/usr/bin/chmod +x "$WORK/bin/chmod"
 export PATH="$WORK/bin:$PATH" CALLS="$WORK/calls" UPLOADS="$WORK/uploads"
 export OUTPUT_FIXTURE="$WORK/output" CACHE_FIXTURE="$WORK/cache"
 export GITHUB_WORKSPACE="$WORK/workspace with spaces" PROJECT=project OUTPUT=out
@@ -156,18 +167,19 @@ done
 printf downloaded > "$CACHE_FIXTURE/dependency"
 
 # Cleanup failures must never bypass container removal or replace build status.
-for failure in rollback staging-rm readonly; do
+for failure in rollback staging-rm chmod readonly; do
     for outcome in success failure INT TERM; do
         printf original > "$GITHUB_WORKSPACE/gradle/dependency"
         mkdir -p "$GITHUB_WORKSPACE/gradle/immutable"
         printf keep > "$GITHUB_WORKSPACE/gradle/immutable/file"
-        chmod 0555 "$GITHUB_WORKSPACE/gradle/immutable"
         : > "$CALLS"
         expected=0
         options=()
         case "$failure" in
             rollback) options+=(FAIL_ROLLBACK=1) ;;
             staging-rm) options+=(FAIL_STAGE_RM=1) ;;
+            chmod) options+=(FAIL_CHMOD=1) ;;
+            readonly) chmod 0555 "$GITHUB_WORKSPACE/gradle/immutable" ;;
         esac
         case "$outcome" in
             failure) options+=(FAIL_BUILD=42); expected=42 ;;
@@ -192,6 +204,10 @@ for failure in rollback staging-rm readonly; do
             staging-rm)
                 grep -q '::warning::.*staging.*remov' "$WORK/cleanup-failure"
                 [ "$(cat "$GITHUB_WORKSPACE/gradle/dependency")" = downloaded ] ;;
+            chmod)
+                grep -q '::warning::.*staging permissions' "$WORK/cleanup-failure"
+                [ "$(cat "$GITHUB_WORKSPACE/gradle/dependency")" = downloaded ]
+                [ -z "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '.solar2d-gradle.*' -print)" ] ;;
             readonly)
                 [ "$(cat "$GITHUB_WORKSPACE/gradle/dependency")" = downloaded ]
                 [ -z "$(find "$GITHUB_WORKSPACE" -maxdepth 1 -name '.solar2d-gradle.*' -print)" ] ;;
@@ -201,6 +217,28 @@ for failure in rollback staging-rm readonly; do
         find "$GITHUB_WORKSPACE" -maxdepth 1 -name '.solar2d-gradle.*' -exec /usr/bin/rm -rf {} +
         mkdir -p "$GITHUB_WORKSPACE/gradle"
     done
+done
+
+# A failed container removal never masks the build result, but fails a clean run.
+for outcome in success failure INT TERM; do
+    : > "$CALLS"
+    expected=1
+    options=(FAIL_DOCKER_RM=1)
+    case "$outcome" in
+        failure) options+=(FAIL_BUILD=42); expected=42 ;;
+        INT) options+=(BUILD_SIGNAL=INT); expected=130 ;;
+        TERM) options+=(BUILD_SIGNAL=TERM); expected=143 ;;
+    esac
+    set +e
+    env "${options[@]}" bash "$ROOT/run-build.sh" build > "$WORK/rm-failure" 2>&1
+    status=$?
+    set -e
+    if [ "$status" != "$expected" ]; then
+        echo "container-removal regression: $outcome expected=$expected actual=$status" >&2
+        cat "$WORK/rm-failure" >&2
+        exit 1
+    fi
+    grep -q 'rm -fv' "$CALLS"
 done
 
 # Execute the exact production command, with accelerated polling for tests.
@@ -312,4 +350,4 @@ grep -q '^run --rm' "$CALLS"
 : > "$CALLS"
 if TRANSPORT=invalid bash "$ROOT/run-build.sh" build; then exit 1; fi
 [ ! -s "$CALLS" ]
-echo 'Build transport checks passed (40 action runs, 9 process-selection cases, 4 reception failures, 4 signal cases, 12 cleanup failure/status cases)'
+echo 'Build transport checks passed (48 action runs, 9 process-selection cases, 4 reception failures, 4 signal cases, 16 cleanup failure/status cases, 4 container-removal failure cases)'
