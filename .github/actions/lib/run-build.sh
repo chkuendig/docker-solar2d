@@ -39,36 +39,29 @@ cleanup() {
     local status=$?
     trap - EXIT
     # Only explicit status decisions may change the result during cleanup.
-    set +e
     trap 'status=130' INT
     trap 'status=143' TERM
     if [ "$created" = true ]; then
         # Restore Gradle downloads even after a failed build. The cache contains
         # dependencies, never the signing work directory or the whole project.
         if [ -n "${GRADLE_CACHE:-}" ]; then
-            # --no-daemon can leave a single-use JVM finishing cache writes.
+            # A signalled build can leave a client or daemon JVM writing cache.
             # Wait for it to exit; never export from a surviving writer.
             if docker exec "$name" sh -c '
-                daemon_running() {
-                    for f in /proc/[0-9]*/comm; do
-                        { read -r comm < "$f"; } 2>/dev/null || continue
-                        [ "$comm" = java ] || continue
-                        p=${f%/comm}
-                        exe=$(readlink "$p/exe") || continue
-                        [ "${exe##*/}" = java ] || continue
-                        if { tr "\0" "\n" < "$p/cmdline"; } 2>/dev/null |
-                            grep -Fxq org.gradle.launcher.daemon.bootstrap.GradleDaemon; then
-                            return 0
-                        fi
+                java_running() {
+                    # The scanner is sh; match executables, never class names.
+                    for f in /proc/[0-9]*/exe; do
+                        exe=$(readlink "$f" 2>/dev/null) || continue
+                        [ "${exe##*/}" = java ] && return 0
                     done
                     return 1
                 }
                 i=0
-                while daemon_running && [ "$i" -lt 10 ]; do
+                while java_running && [ "$i" -lt 10 ]; do
                     sleep 1
                     i=$((i + 1))
                 done
-                ! daemon_running
+                ! java_running
             '; then
                 local cache stage retain_stage=false
                 cache="${GITHUB_WORKSPACE}/${GRADLE_CACHE%/}"
@@ -98,7 +91,7 @@ cleanup() {
                     rm -rf "$stage" || echo "::warning::Gradle cache staging directory could not be removed: $stage"
                 fi
             else
-                echo "::warning::Gradle daemon wait did not complete successfully; skipping cache export"
+                echo "::warning::Java process wait did not complete successfully; skipping cache export"
             fi
         fi
         docker rm -fv "$name" >/dev/null || { [ "$status" -ne 0 ] || status=1; }

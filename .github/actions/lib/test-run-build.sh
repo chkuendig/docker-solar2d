@@ -54,7 +54,7 @@ case "$1" in
             exit "${FAIL_BUILD:-0}"
         elif [ "${3:-}" = sh ] && [ "${4:-}" = -c ]; then
             # Execute the production scanner against real /proc processes.
-            # An unrelated host Gradle JVM can affect these stub checks.
+            # An unrelated Java executable can affect these stub checks.
             sh -c "$5"
         elif [[ " $* " == *' -xf - '* ]]; then
             tar -tf - >> "$UPLOADS"
@@ -229,32 +229,37 @@ sh "$WORK/scanner"
 [ ! -s "$WORK/waits" ]
 kill "$decoy"
 wait "$decoy" 2>/dev/null || :
-# A Java executable with only a substring match is not a Gradle daemon.
-(trap - EXIT; exec "$JAVA_FIXTURE" -c 'import time; time.sleep(20)' prefix.org.gradle.launcher.daemon.bootstrap.GradleDaemon.suffix) &
+# A process named java with a non-Java executable must be ignored.
+(trap - EXIT; exec python3 -c 'import ctypes,time; ctypes.CDLL(None).prctl(15,b"java",0,0,0); time.sleep(20)') &
 decoy=$!
-while [ "$(readlink /proc/"$decoy"/exe)" != "$JAVA_FIXTURE" ]; do kill -0 "$decoy"; /usr/bin/sleep .01; done
+while [ "$(cat /proc/"$decoy"/comm)" != java ]; do kill -0 "$decoy"; /usr/bin/sleep .01; done
 sh "$WORK/scanner"
 [ ! -s "$WORK/waits" ]
 kill "$decoy"
 wait "$decoy" 2>/dev/null || :
-for lifetime in 1 20; do
-    (trap - EXIT; exec "$JAVA_FIXTURE" -c 'import time,sys; time.sleep(float(sys.argv[1]))' "$lifetime" org.gradle.launcher.daemon.bootstrap.GradleDaemon) &
-    daemon=$!
-    # Wait until exec has installed the fixture executable.
-    while [ "$(readlink /proc/"$daemon"/exe)" != "$JAVA_FIXTURE" ]; do kill -0 "$daemon"; /usr/bin/sleep .01; done
-    : > "$CALLS"
-    : > "$WORK/waits"
-    bash "$ROOT/run-build.sh" build > "$WORK/daemon" 2>&1
-    if [ "$lifetime" = 20 ]; then
-        kill -0 "$daemon"
-        grep -q '::warning::.*skipp' "$WORK/daemon"
-        ! grep -q 'tar -C .*gradle.*-cf' "$CALLS"
-        kill "$daemon"
-    else
-        grep -q 'tar -C .*gradle.*-cf' "$CALLS"
-        [ -s "$WORK/waits" ]
-    fi
-    wait "$daemon" 2>/dev/null || :
+for main in org.gradle.launcher.daemon.bootstrap.GradleDaemon org.gradle.wrapper.GradleWrapperMain org.gradle.launcher.GradleMain; do
+    for lifetime in 1 20; do
+        (trap - EXIT; exec "$JAVA_FIXTURE" -c 'import time,sys; time.sleep(float(sys.argv[1]))' "$lifetime" "$main") &
+        writer=$!
+        # Wait until exec has installed the fixture executable.
+        while [ "$(readlink /proc/"$writer"/exe)" != "$JAVA_FIXTURE" ]; do kill -0 "$writer"; /usr/bin/sleep .01; done
+        original=$(cache_digest)
+        : > "$CALLS"
+        : > "$WORK/waits"
+        bash "$ROOT/run-build.sh" build > "$WORK/writer" 2>&1
+        if [ "$lifetime" = 20 ]; then
+            kill -0 "$writer"
+            [ "$(wc -l < "$WORK/waits")" = 10 ]
+            [ "$(cache_digest)" = "$original" ]
+            grep -q '::warning::.*skipp' "$WORK/writer"
+            ! grep -q 'tar -C .*gradle.*-cf' "$CALLS"
+            kill "$writer"
+        else
+            grep -q 'tar -C .*gradle.*-cf' "$CALLS"
+            [ -s "$WORK/waits" ]
+        fi
+        wait "$writer" 2>/dev/null || :
+    done
 done
 rm "$WORK/bin/sleep"
 # A complete archive followed by producer failure is still a failed pipeline.
@@ -307,4 +312,4 @@ grep -q '^run --rm' "$CALLS"
 : > "$CALLS"
 if TRANSPORT=invalid bash "$ROOT/run-build.sh" build; then exit 1; fi
 [ ! -s "$CALLS" ]
-echo 'Build transport checks passed (36 action runs, 5 process-selection cases, 4 reception failures, 4 signal cases, 12 cleanup failure/status cases)'
+echo 'Build transport checks passed (40 action runs, 9 process-selection cases, 4 reception failures, 4 signal cases, 12 cleanup failure/status cases)'
