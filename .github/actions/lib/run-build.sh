@@ -42,9 +42,33 @@ cleanup() {
         # Restore Gradle downloads even after a failed build. The cache contains
         # dependencies, never the signing work directory or the whole project.
         if [ -n "${GRADLE_CACHE:-}" ]; then
+            # The engine's Android build invokes Gradle with --no-daemon, which
+            # is a single-use daemon JVM: it outlives the exited client briefly
+            # and keeps flushing its caches and log while the copy below reads
+            # them, so tar can report a mutating cache and fail a build that
+            # succeeded. Wait the daemon out, then kill any survivor, so nothing
+            # writes the cache mid-copy. Killing may tear a partially written
+            # cache entry; Gradle discards and re-downloads those by itself.
+            docker exec "$name" sh -c '
+                daemon_pids() {
+                    for f in /proc/[0-9]*/cmdline; do
+                        p=${f#/proc/}; p=${p%/cmdline}
+                        tr "\0" " " < "$f" 2>/dev/null | grep -q GradleDaemon && echo "$p"
+                    done
+                }
+                i=0
+                left=$(daemon_pids)
+                while [ -n "$left" ] && [ "$i" -lt 10 ]; do
+                    sleep 1
+                    i=$((i + 1))
+                    left=$(daemon_pids)
+                done
+                for p in $left; do kill -9 "$p" 2>/dev/null || :; done
+                [ -z "$left" ] || sleep 1
+            ' || true
             if ! docker exec "$name" tar -C "$GITHUB_WORKSPACE/$GRADLE_CACHE" -cf - . \
                 | tar --no-same-owner -C "$GITHUB_WORKSPACE/$GRADLE_CACHE" -xf -; then
-                [ "$status" -ne 0 ] || status=1
+                echo "::warning::Gradle cache copy failed; cached downloads were not restored"
             fi
         fi
         docker rm -fv "$name" >/dev/null || { [ "$status" -ne 0 ] || status=1; }

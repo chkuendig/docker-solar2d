@@ -21,8 +21,15 @@ case "$1" in
             tar -tf - >> "$UPLOADS"
         elif [[ " $* " == *' -cf - '* ]]; then
             case "$*" in
-                *gradle*) tar -C "$CACHE_FIXTURE" -cf - . ;;
-                *) tar -C "$OUTPUT_FIXTURE" -cf - . ;;
+                *gradle*)
+                    if [ -n "${FAIL_CACHE:-}" ]; then
+                        echo "tar: File removed before we read it" >&2
+                        exit 1
+                    fi
+                    tar -C "$CACHE_FIXTURE" -cf - . ;;
+                *)
+                    if [ -n "${FAIL_OUTPUT:-}" ]; then exit 1; fi
+                    tar -C "$OUTPUT_FIXTURE" -cf - . ;;
             esac
         fi
         ;;
@@ -39,6 +46,7 @@ bash "$ROOT/run-build.sh" build --app-name Fixture
 [ "$(cat "$GITHUB_WORKSPACE/out/index.html")" = built ]
 [ "$(cat "$GITHUB_WORKSPACE/gradle/dependency")" = downloaded ]
 grep -q 'project/main.lua' "$UPLOADS"
+grep -q 'GradleDaemon' "$CALLS"
 grep -q 'rm -fv' "$CALLS"
 ! grep -q 'secret-that-must-not-be-in-arguments' "$CALLS"
 ! grep -q -- '-v ' "$CALLS"
@@ -55,6 +63,34 @@ set -e
 [ "$status" = 42 ]
 grep -q 'rm -fv' "$CALLS"
 [ "$(cat "$GITHUB_WORKSPACE/gradle/dependency")" = downloaded ]
+
+: > "$CALLS"
+set +e
+FAIL_CACHE=1 bash "$ROOT/run-build.sh" build >"$WORK/out-cache-success" 2>&1
+status=$?
+set -e
+[ "$status" = 0 ]
+grep -q '::warning::' "$WORK/out-cache-success"
+[ "$(cat "$GITHUB_WORKSPACE/out/index.html")" = built ]
+grep -q 'rm -fv' "$CALLS"
+
+: > "$CALLS"
+set +e
+FAIL_BUILD=42 FAIL_CACHE=1 bash "$ROOT/run-build.sh" build-android >"$WORK/out-cache-failed" 2>&1
+status=$?
+set -e
+[ "$status" = 42 ]
+grep -q '::warning::' "$WORK/out-cache-failed"
+grep -q 'gradle' "$CALLS"
+grep -q 'rm -fv' "$CALLS"
+
+: > "$CALLS"
+set +e
+FAIL_OUTPUT=1 bash "$ROOT/run-build.sh" build >"$WORK/out-output" 2>&1
+status=$?
+set -e
+[ "$status" -ne 0 ]
+grep -q 'rm -fv' "$CALLS"
 
 : > "$CALLS"
 SOLAR2D_ACTION_KEEPALIVE_SECONDS=2700 bash "$ROOT/run-build.sh" build
@@ -77,4 +113,4 @@ grep -q '^run --rm' "$CALLS"
 : > "$CALLS"
 if TRANSPORT=invalid bash "$ROOT/run-build.sh" build; then exit 1; fi
 [ ! -s "$CALLS" ]
-echo 'Build transport checks passed (stream, bind, failure cleanup, cache, secret forwarding)'
+echo 'Build transport checks passed (stream, bind, failure cleanup, cache, copy failures, secret forwarding)'
