@@ -41,7 +41,11 @@ daemon cannot see the runner's checkout paths: inputs and outputs travel through
 client-side tar streams, and the temporary container is removed after the build.
 The default `bind` transport mounts the workspace directly. Android's optional
 `gradle-cache` input names a workspace-relative directory that can be restored
-with `actions/cache`; streamed builds copy downloads back even on build failure:
+with `actions/cache`. Streamed builds attempt cache export even on build failure.
+Export waits up to 10 seconds for Gradle daemon JVMs to exit and is skipped with
+a warning if any survive. Transfers are staged beside the cache and replace it
+only after successful reception; failed transfers warn and keep the restored
+cache. Cache export does not change the build status.
 
 Streamed containers auto-remove on exit and carry their run ID. Their lifetime is
 bounded to 1800 seconds by default; set `SOLAR2D_ACTION_KEEPALIVE_SECONDS` in the

@@ -38,37 +38,57 @@ created=false
 cleanup() {
     local status=$?
     trap - EXIT
+    trap 'status=130' INT
+    trap 'status=143' TERM
     if [ "$created" = true ]; then
         # Restore Gradle downloads even after a failed build. The cache contains
         # dependencies, never the signing work directory or the whole project.
         if [ -n "${GRADLE_CACHE:-}" ]; then
-            # The engine's Android build invokes Gradle with --no-daemon, which
-            # is a single-use daemon JVM: it outlives the exited client briefly
-            # and keeps flushing its caches and log while the copy below reads
-            # them, so tar can report a mutating cache and fail a build that
-            # succeeded. Wait the daemon out, then kill any survivor, so nothing
-            # writes the cache mid-copy. Killing may tear a partially written
-            # cache entry; Gradle discards and re-downloads those by itself.
-            docker exec "$name" sh -c '
-                daemon_pids() {
-                    for f in /proc/[0-9]*/cmdline; do
-                        p=${f#/proc/}; p=${p%/cmdline}
-                        tr "\0" " " < "$f" 2>/dev/null | grep -q GradleDaemon && echo "$p"
+            # --no-daemon can leave a single-use JVM finishing cache writes.
+            # Wait for it to exit; never export from a surviving writer.
+            if docker exec "$name" sh -c '
+                daemon_running() {
+                    for f in /proc/[0-9]*/comm; do
+                        { read -r comm < "$f"; } 2>/dev/null || continue
+                        [ "$comm" = java ] || continue
+                        p=${f%/comm}
+                        exe=$(readlink "$p/exe") || continue
+                        [ "${exe##*/}" = java ] || continue
+                        if { tr "\0" "\n" < "$p/cmdline"; } 2>/dev/null |
+                            grep -Fxq org.gradle.launcher.daemon.bootstrap.GradleDaemon; then
+                            return 0
+                        fi
                     done
+                    return 1
                 }
                 i=0
-                left=$(daemon_pids)
-                while [ -n "$left" ] && [ "$i" -lt 10 ]; do
+                while daemon_running && [ "$i" -lt 10 ]; do
                     sleep 1
                     i=$((i + 1))
-                    left=$(daemon_pids)
                 done
-                for p in $left; do kill -9 "$p" 2>/dev/null || :; done
-                [ -z "$left" ] || sleep 1
-            ' || true
-            if ! docker exec "$name" tar -C "$GITHUB_WORKSPACE/$GRADLE_CACHE" -cf - . \
-                | tar --no-same-owner -C "$GITHUB_WORKSPACE/$GRADLE_CACHE" -xf -; then
-                echo "::warning::Gradle cache copy failed; cached downloads were not restored"
+                ! daemon_running
+            '; then
+                local cache stage
+                cache="${GITHUB_WORKSPACE}/${GRADLE_CACHE%/}"
+                # Staging and both renames stay on the cache filesystem.
+                stage=$(mktemp -d "$(dirname "$cache")/.solar2d-gradle.XXXXXX") || stage=
+                if [ -n "$stage" ] && mkdir "$stage/next" &&
+                    docker exec "$name" tar -C "$cache" -cf - . |
+                        tar --no-same-owner -C "$stage/next" -xf -; then
+                    if mv "$cache" "$stage/previous"; then
+                        if ! mv "$stage/next" "$cache"; then
+                            mv "$stage/previous" "$cache"
+                            echo "::warning::Gradle cache publish failed; keeping restored cache"
+                        fi
+                    else
+                        echo "::warning::Gradle cache publish failed; keeping restored cache"
+                    fi
+                else
+                    echo "::warning::Gradle cache copy failed; keeping restored cache"
+                fi
+                [ -z "$stage" ] || rm -rf "$stage"
+            else
+                echo "::warning::Gradle daemon still running or inspection failed; skipping cache export"
             fi
         fi
         docker rm -fv "$name" >/dev/null || { [ "$status" -ne 0 ] || status=1; }
