@@ -47,7 +47,7 @@ inputs:
     required: false
     default: "bind"
   gradle-cache:
-    description: "Optional Gradle cache directory, relative to the workspace root; restored after streamed builds too"
+    description: "Optional Gradle cache directory, relative to the workspace root; exported on a best-effort basis after streamed builds"
     required: false
     default: ""
   image:
