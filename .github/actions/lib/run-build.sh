@@ -38,13 +38,67 @@ created=false
 cleanup() {
     local status=$?
     trap - EXIT
+    # Only explicit status decisions may change the result during cleanup.
+    set +e
+    trap 'status=130' INT
+    trap 'status=143' TERM
     if [ "$created" = true ]; then
         # Restore Gradle downloads even after a failed build. The cache contains
         # dependencies, never the signing work directory or the whole project.
         if [ -n "${GRADLE_CACHE:-}" ]; then
-            if ! docker exec "$name" tar -C "$GITHUB_WORKSPACE/$GRADLE_CACHE" -cf - . \
-                | tar --no-same-owner -C "$GITHUB_WORKSPACE/$GRADLE_CACHE" -xf -; then
-                [ "$status" -ne 0 ] || status=1
+            # --no-daemon can leave a single-use JVM finishing cache writes.
+            # Wait for it to exit; never export from a surviving writer.
+            if docker exec "$name" sh -c '
+                daemon_running() {
+                    for f in /proc/[0-9]*/comm; do
+                        { read -r comm < "$f"; } 2>/dev/null || continue
+                        [ "$comm" = java ] || continue
+                        p=${f%/comm}
+                        exe=$(readlink "$p/exe") || continue
+                        [ "${exe##*/}" = java ] || continue
+                        if { tr "\0" "\n" < "$p/cmdline"; } 2>/dev/null |
+                            grep -Fxq org.gradle.launcher.daemon.bootstrap.GradleDaemon; then
+                            return 0
+                        fi
+                    done
+                    return 1
+                }
+                i=0
+                while daemon_running && [ "$i" -lt 10 ]; do
+                    sleep 1
+                    i=$((i + 1))
+                done
+                ! daemon_running
+            '; then
+                local cache stage retain_stage=false
+                cache="${GITHUB_WORKSPACE}/${GRADLE_CACHE%/}"
+                # Staging and both renames stay on the cache filesystem.
+                stage=$(mktemp -d "$(dirname "$cache")/.solar2d-gradle.XXXXXX") || stage=
+                if [ -n "$stage" ] && mkdir "$stage/next" &&
+                    docker exec "$name" tar -C "$cache" -cf - . |
+                        tar --no-same-owner -C "$stage/next" -xf -; then
+                    if mv "$cache" "$stage/previous"; then
+                        if ! mv "$stage/next" "$cache"; then
+                            if mv "$stage/previous" "$cache"; then
+                                echo "::warning::Gradle cache publish failed; keeping restored cache"
+                            else
+                                retain_stage=true
+                                echo "::warning::Gradle cache rollback failed; old cache retained at $stage/previous"
+                            fi
+                        fi
+                    else
+                        echo "::warning::Gradle cache publish failed; keeping restored cache"
+                    fi
+                else
+                    echo "::warning::Gradle cache copy failed; keeping restored cache"
+                fi
+                if [ -n "$stage" ] && [ "$retain_stage" = false ]; then
+                    # Immutable cache workspaces can contain read-only directories.
+                    chmod -R u+w "$stage" || echo "::warning::Gradle cache staging permissions could not be updated"
+                    rm -rf "$stage" || echo "::warning::Gradle cache staging directory could not be removed: $stage"
+                fi
+            else
+                echo "::warning::Gradle daemon wait did not complete successfully; skipping cache export"
             fi
         fi
         docker rm -fv "$name" >/dev/null || { [ "$status" -ne 0 ] || status=1; }
