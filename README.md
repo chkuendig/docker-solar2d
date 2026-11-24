@@ -42,9 +42,10 @@ client-side tar streams, and the temporary container is removed after the build.
 The default `bind` transport mounts the workspace directly. Android's optional
 `gradle-cache` input names a workspace-relative directory that can be restored
 with `actions/cache`. Streamed builds attempt cache export even on build failure.
-Export waits up to 10 seconds for Gradle daemon JVMs to exit and is skipped with
+Export waits up to 10 seconds for all Java executables to exit and is skipped with
 a warning if any survive or the wait command fails. Callers should use
-`--no-daemon`; a long-lived daemon will keep causing exports to be skipped.
+`--no-daemon`; any long-lived Java process will keep causing exports to be skipped.
+The scanner itself runs in `sh` and does not start a JVM.
 Transfers are staged beside the cache and replace it
 only after successful reception; failed transfers warn and keep the restored
 cache. Cache export does not change the build status. Staging cleanup is best
